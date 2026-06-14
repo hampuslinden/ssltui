@@ -42,7 +42,7 @@ def renew_all(
     for cert in certs_expiring_within(root, threshold_days):
         cn = cert["cn"]
         try:
-            renew_cert(root, cn)
+            renew_cert(root, cn, method="cron")
             results.append((cn, True, "renewed"))
         except CAError as exc:
             results.append((cn, False, str(exc)))

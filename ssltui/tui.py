@@ -74,6 +74,26 @@ def _expiry_style(days: int) -> str:
     return "green"
 
 
+# Event type → (Rich style, human label) for the dashboard server log.
+_EVENT_STYLE: dict[str, tuple[str, str]] = {
+    "issue": ("green", "cert issued"),
+    "renew": ("cyan", "cert renewed"),
+    "revoke": ("yellow", "cert revoked"),
+    "key_download": ("bold yellow", "key downloaded"),
+    "ca_init": ("bold red", "CA re-initialised"),
+}
+
+
+def _format_tui_event(ev: dict) -> tuple[str, str]:
+    """Map a stored event row to a (style, message) pair for the request log."""
+    style, label = _EVENT_STYLE.get(ev["type"], ("dim", ev["type"]))
+    method = ev.get("method")
+    suffix = f" ({method})" if method else ""
+    cn = ev.get("cn")
+    msg = f"{label}{suffix}: {cn}" if cn else f"{label}{suffix}"
+    return style, msg
+
+
 # ---------------------------------------------------------------------------
 # Confirm modal (used for destructive actions)
 # ---------------------------------------------------------------------------
@@ -125,6 +145,44 @@ class ConfirmScreen(ModalScreen):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+
+class ErrorScreen(ModalScreen):
+    """Show a blocking error message with a single dismiss action."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("enter", "close", "Close"),
+    ]
+
+    DEFAULT_CSS = """
+    ErrorScreen { align: center middle; }
+    ErrorScreen > Vertical {
+        width: 60; height: auto;
+        background: $surface; border: thick $error; padding: 1 2;
+    }
+    ErrorScreen .title { text-align: center; text-style: bold; color: $error; margin-bottom: 1; }
+    ErrorScreen .message { text-align: center; margin-bottom: 1; }
+    ErrorScreen .hint { text-align: center; color: $text-muted; }
+    """
+
+    def __init__(self, title: str, message: str) -> None:
+        super().__init__()
+        self._title = title
+        self._message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(self._title, classes="title")
+            yield Label(self._message, classes="message")
+            yield Label("[dim]Enter / Esc[/dim] close", markup=True, classes="hint")
+            yield Button("OK", variant="primary", id="ok")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +351,18 @@ class IssueCertScreen(ModalScreen):
         if not cn:
             error.update("CN is required.")
             self.query_one("#cn", Input).focus()
+            return
+
+        if store.get_cert(_root(), cn) is not None:
+            self.app.push_screen(
+                ErrorScreen(
+                    title="Certificate already exists",
+                    message=(
+                        f"A certificate for '{cn}' already exists.\n"
+                        "Revoke it before issuing a new one."
+                    ),
+                )
+            )
             return
 
         try:
@@ -729,9 +799,20 @@ class CertViewScreen(Screen):
             return True if self._key_path else False
         return True
 
+    def _record_key_access(self, detail: str) -> None:
+        """Audit a private-key exposure in the TUI (reveal/copy/save)."""
+        cn = self._title.removeprefix("Certificate: ")
+        try:
+            store.add_event(_root(), "key_download", cn=cn, method="tui", detail=detail)
+        except Exception:
+            pass
+
     def action_copy(self) -> None:
-        pem = self._key_pem if (self._showing_key and self._key_pem) else self._pem
+        showing_key = self._showing_key and self._key_pem is not None
+        pem = self._key_pem if showing_key else self._pem
         self.app.copy_to_clipboard(pem)
+        if showing_key:
+            self._record_key_access("copy")
         self.notify("Copied to clipboard.")
 
     def action_toggle_key(self) -> None:
@@ -741,6 +822,8 @@ class CertViewScreen(Screen):
         if self._key_pem is None:
             self._key_pem = self._key_path.read_text()
         self._showing_key = not self._showing_key
+        if self._showing_key:
+            self._record_key_access("reveal")
         pem_widget = self.query_one("#pem-content", Static)
         if self._showing_key:
             combined = self._pem.rstrip("\n") + "\n" + self._key_pem
@@ -759,6 +842,7 @@ class CertViewScreen(Screen):
             combined = self._pem.rstrip("\n") + "\n" + self._key_pem
             content = combined
             default = str(Path.home() / f"{safe_name}.pem")
+            self._record_key_access("save")
         else:
             content = self._pem
             default = str(Path.home() / self._filename)
@@ -861,8 +945,13 @@ class MainScreen(Screen):
 
     def _build_table(self) -> None:
         table = self.query_one("#cert-table", DataTable)
-        table.clear(columns=True)
-        table.add_columns("CN", "SANs", "Key", "Expires", "Days left")
+        # Add the columns once; on later refreshes clear rows only. Re-adding
+        # columns (clear(columns=True)) makes Textual recompute auto-widths from
+        # the header labels alone when called outside a fresh mount, which
+        # collapses the column widths.
+        if not table.columns:
+            table.add_columns("CN", "SANs", "Key", "Expires", "Days left")
+        table.clear()
 
         for cert in store.list_certs(_root()):
             days = days_until_expiry(cert["expiry"])
@@ -1091,7 +1180,8 @@ class ServeScreen(Screen):
         self._token = token
         self._log_handler: _WerkzeugCapture | None = None
         self._fs_state: dict[str, float] = {}
-        self._cached_cns: dict[str, dict] = {}
+        self._last_version: int = 0
+        self._last_event_id: int = 0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -1122,7 +1212,8 @@ class ServeScreen(Screen):
 
         self._server.start()
         self._fs_state = self._fs_snapshot()
-        self._cached_cns = {c["cn"]: c for c in store.list_certs(self._server.root)}
+        self._last_version = self._safe_version()
+        self._last_event_id = self._latest_event_id()
         self._write_history()
         self.set_interval(0.1, self._drain_log)
         self.set_interval(1.0, self._poll_fs)
@@ -1144,33 +1235,40 @@ class ServeScreen(Screen):
             # text and corrupt the line, so decode them into a Rich Text.
             log.write(Text.from_ansi(line))
 
-    def _write_history(self) -> None:
-        root = self._server.root
-        events: list[tuple[str, str, str]] = []
-        for cert in store.list_certs(root):
-            events.append((cert["issued"], "cert issued", cert["cn"]))
-        for rev in store.list_revoked(root):
-            events.append((rev["revoked_at"], "cert revoked", rev["cn"]))
+    def _safe_version(self) -> int:
+        try:
+            return store.get_version(self._server.root)
+        except Exception:
+            return self._last_version
 
-        events.sort(key=lambda e: e[0])
-        recent = events[-5:]
-        if not recent:
+    def _latest_event_id(self) -> int:
+        try:
+            evs = store.list_events(self._server.root, limit=1)
+            return evs[-1]["id"] if evs else 0
+        except Exception:
+            return 0
+
+    def _write_history(self) -> None:
+        events = store.list_events(self._server.root, limit=5)
+        if not events:
             return
 
         log = self.query_one("#request-log", RichLog)
-        for ts_iso, label, cn in recent:
+        for ev in events:
+            _, msg = _format_tui_event(ev)
+            ts_iso = ev.get("ts") or ""
             try:
                 dt = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
                 ts = dt.strftime("%Y-%m-%d %H:%M")
             except ValueError:
                 ts = ts_iso[:16]
-            log.write(Text(f"{ts}  HISTORICAL  {label}: {cn}", style="dim italic"))
+            log.write(Text(f"{ts}  HISTORICAL  {msg}", style="dim italic"))
         log.write(Text("─" * 60 + "  live", style="dim"))
 
     def _fs_snapshot(self) -> dict[str, float]:
         root = self._server.root
         state: dict[str, float] = {}
-        for name in ("index.json", "ca.crt", "ca.crl", "api_token"):
+        for name in ("ca.crt", "ca.crl", "api_token"):
             p = root / name
             if p.exists():
                 state[name] = p.stat().st_mtime
@@ -1184,26 +1282,25 @@ class ServeScreen(Screen):
 
         log = self.query_one("#request-log", RichLog)
         ts = datetime.now().strftime("%H:%M:%S")
-        root = self._server.root
 
-        if now.get("index.json") != self._fs_state.get("index.json"):
+        version = self._safe_version()
+        version_changed = version != self._last_version
+        if version_changed:
+            self._last_version = version
             try:
-                current = {c["cn"]: c for c in store.list_certs(root)}
+                new_events = store.list_events(self._server.root, limit=100)
             except Exception:
-                current = {}
-            old = self._cached_cns
-            for cn in set(current) - set(old):
-                log.write(Text(f"{ts}  cert issued: {cn}", style="green"))
-            for cn in set(old) - set(current):
-                log.write(Text(f"{ts}  cert revoked: {cn}", style="yellow"))
-            for cn in set(current) & set(old):
-                if current[cn].get("serial") != old[cn].get("serial"):
-                    log.write(Text(f"{ts}  cert renewed: {cn}", style="cyan"))
-            self._cached_cns = current
+                new_events = []
+            for ev in new_events:
+                if ev["id"] <= self._last_event_id:
+                    continue
+                style, msg = _format_tui_event(ev)
+                log.write(Text(f"{ts}  {msg}", style=style))
+                self._last_event_id = ev["id"]
 
-        if now.get("ca.crl") != self._fs_state.get("ca.crl") and now.get(
-            "index.json"
-        ) == self._fs_state.get("index.json"):
+        # CRL regeneration accompanies revokes (already logged above), so only
+        # surface a standalone "CRL regenerated" when no event was recorded.
+        if not version_changed and now.get("ca.crl") != self._fs_state.get("ca.crl"):
             log.write(Text(f"{ts}  CRL regenerated", style="dim"))
 
         if now.get("ca.crt") != self._fs_state.get("ca.crt"):

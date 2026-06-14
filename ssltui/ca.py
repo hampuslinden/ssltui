@@ -165,10 +165,14 @@ def issue_cert(
     sans: list[str] | None = None,
     key_type: str = "ec",
     validity_days: int = config.LEAF_VALIDITY_DAYS,
+    method: str = "tui",
+    event_type: str = "issue",
 ) -> dict:
     """Issue a signed leaf certificate.
 
-    Returns the metadata dict that was written to the store.
+    Returns the metadata dict that was written to the store. ``method`` records
+    which interface triggered the issue (api/tui/cli/cron); ``event_type`` lets
+    renew_cert log a ``renew`` instead of a duplicate ``issue``.
     """
     if not config.ca_key_path(root).exists():
         raise CAError("CA not initialised. Run init_ca() first.")
@@ -293,9 +297,10 @@ def issue_cert(
         "chain": str(chain_path),
     }
 
-    from ssltui.store import add_cert
+    from ssltui.store import add_cert, add_event
 
     add_cert(root, metadata)
+    add_event(root, event_type, cn=cn, method=method)
 
     return metadata
 
@@ -305,7 +310,7 @@ def issue_cert(
 # ---------------------------------------------------------------------------
 
 
-def renew_cert(root: Path, cn: str) -> dict:
+def renew_cert(root: Path, cn: str, method: str = "tui") -> dict:
     """Re-issue a cert for *cn*, preserving its key type and SANs."""
     from ssltui.store import get_cert
 
@@ -334,6 +339,8 @@ def renew_cert(root: Path, cn: str) -> dict:
         ],
         key_type=entry.get("key_type", "ec"),
         validity_days=entry.get("validity_days", config.LEAF_VALIDITY_DAYS),
+        method=method,
+        event_type="renew",
     )
 
 
@@ -342,9 +349,9 @@ def renew_cert(root: Path, cn: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def revoke_cert(root: Path, cn: str) -> None:
+def revoke_cert(root: Path, cn: str, method: str = "tui") -> None:
     """Revoke a cert, update ca.crl, delete its files, and remove it from the store."""
-    from ssltui.store import add_revoked, get_cert, remove_cert
+    from ssltui.store import add_event, add_revoked, get_cert, remove_cert
 
     entry = get_cert(root, cn)
     if entry is None:
@@ -366,6 +373,7 @@ def revoke_cert(root: Path, cn: str) -> None:
         shutil.rmtree(cd)
 
     remove_cert(root, cn)
+    add_event(root, "revoke", cn=cn, method=method)
 
 
 def generate_crl(root: Path) -> Path:
