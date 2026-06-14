@@ -1,3 +1,8 @@
+.*
+
+# Git
+!.*github
+
 # Python files to ignore
 __pycache__
 .venv
@@ -13,9 +18,6 @@ data/
 *.crt
 *.key
 *.pem
-
-# Temp launch tests
-.temp*
 
 # Build artifacts
 *.tar.gz

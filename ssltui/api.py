@@ -43,18 +43,22 @@ try:
         send_file,
         session,
         stream_with_context,
-        url_for,
     )
     from werkzeug.exceptions import HTTPException
     from werkzeug.serving import make_server
-except ImportError:
+except ImportError as err:
     raise SystemExit(
-        "Flask is required for the API server.\n"
-        "Install it with:  uv sync --extra api"
-    )
+        "Flask is required for the API server.\nInstall it with:  uv sync --extra api"
+    ) from err
 
 from ssltui import config, store
-from ssltui.ca import CAError, ca_expiry, ca_fingerprint, ca_subject, issue_cert, renew_cert
+from ssltui.ca import (
+    CAError,
+    ca_expiry,
+    ca_subject,
+    issue_cert,
+    renew_cert,
+)
 from ssltui.renewal import days_until_expiry
 
 
@@ -77,6 +81,7 @@ def _resolve_token(root: Path) -> str:
 # Event log (shared between API server and dashboard)
 # ---------------------------------------------------------------------------
 
+
 class EventLog:
     """Thread-safe in-memory ring buffer of dashboard events."""
 
@@ -91,7 +96,9 @@ class EventLog:
         ts = datetime.now().strftime("%H:%M:%S")
         with self._lock:
             self._seq += 1
-            self._events.append({"ts": ts, "level": level, "msg": msg, "_seq": self._seq})
+            self._events.append(
+                {"ts": ts, "level": level, "msg": msg, "_seq": self._seq}
+            )
             if len(self._events) > self._maxlen:
                 del self._events[0]
 
@@ -1008,12 +1015,14 @@ setInterval(loadCerts, 30000);
 # --- TLS cipher policy (see CLAUDE.md) -------------------------------------
 # TLS 1.2 fallback suites; TLS 1.3 suites are governed by OpenSSL defaults,
 # which already match the allowed set.
-_TLS12_CIPHERS = ":".join([
-    "ECDHE-ECDSA-AES256-GCM-SHA384",
-    "ECDHE-RSA-AES256-GCM-SHA384",
-    "ECDHE-ECDSA-CHACHA20-POLY1305",
-    "ECDHE-RSA-CHACHA20-POLY1305",
-])
+_TLS12_CIPHERS = ":".join(
+    [
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-RSA-AES256-GCM-SHA384",
+        "ECDHE-ECDSA-CHACHA20-POLY1305",
+        "ECDHE-RSA-CHACHA20-POLY1305",
+    ]
+)
 
 
 def server_ssl_context(root: Path) -> tuple[ssl.SSLContext | None, str | None]:
@@ -1053,9 +1062,16 @@ class APIServer:
     an HTTPS listener on *https_port*, which becomes the advertised default.
     """
 
-    def __init__(self, host: str, port: int, token: str, root: Path,
-                 threaded: bool = True, https_port: int | None = None,
-                 ssl_context: ssl.SSLContext | None = None) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        token: str,
+        root: Path,
+        threaded: bool = True,
+        https_port: int | None = None,
+        ssl_context: ssl.SSLContext | None = None,
+    ) -> None:
         self.event_log = EventLog()
         flask_app = create_app(root, token, self.event_log)
         self.host = host
@@ -1067,8 +1083,9 @@ class APIServer:
         self._http = make_server(host, port, flask_app, threaded=threaded)
         self._https = None
         if ssl_context is not None and https_port is not None:
-            self._https = make_server(host, https_port, flask_app,
-                                      threaded=threaded, ssl_context=ssl_context)
+            self._https = make_server(
+                host, https_port, flask_app, threaded=threaded, ssl_context=ssl_context
+            )
 
     @property
     def secure(self) -> bool:
@@ -1205,6 +1222,7 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
             if not session.get("_auth"):
                 return redirect("/dashboard/login")
             return f(*a, **kw)
+
         return _w
 
     def _require_session_api(f):
@@ -1213,6 +1231,7 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
             if not session.get("_auth"):
                 return jsonify(error="Unauthorized"), 401
             return f(*a, **kw)
+
         return _w
 
     # --- Dashboard routes ---
@@ -1322,7 +1341,9 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
     def dashboard_crl_download():
         crl = config.crl_path(root)
         if not crl.exists():
-            abort(404, description="CRL not found — no certificates have been revoked yet")
+            abort(
+                404, description="CRL not found — no certificates have been revoked yet"
+            )
         return send_file(
             io.BytesIO(crl.read_bytes()),
             mimetype="application/x-pem-file",
@@ -1333,9 +1354,13 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
     return app
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8080,
-               https_port: int = 8443, debug: bool = False,
-               threaded: bool = True) -> None:
+def run_server(
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    https_port: int = 8443,
+    debug: bool = False,
+    threaded: bool = True,
+) -> None:
     """Headless blocking server — used when stdout is not a TTY.
 
     Serves HTTP on *port* and, when a valid server certificate is configured,
@@ -1352,8 +1377,13 @@ def run_server(host: str = "127.0.0.1", port: int = 8080,
     ctx, fqdn = server_ssl_context(root)
 
     server = APIServer(
-        host=host, port=port, token=token, root=root, threaded=threaded,
-        https_port=https_port if ctx is not None else None, ssl_context=ctx,
+        host=host,
+        port=port,
+        token=token,
+        root=root,
+        threaded=threaded,
+        https_port=https_port if ctx is not None else None,
+        ssl_context=ctx,
     )
 
     if ctx is not None:

@@ -89,7 +89,7 @@ at different directories or by using **p Root dir** in the TUI to switch at runt
 
 The interactive TUI is the default mode (`uv run ssltui`). Press **i** to
 initialise the CA and **n** to issue a certificate. For the full keyboard
-reference and the issue-form walkthrough, see [TUI.md](TUI.md).
+reference and the issue-form walkthrough, see [TUI.md](docs/TUI.md).
 
 ![ssltui TUI showing the certificate list](docs/artifacts/tui.png)
 
@@ -327,7 +327,7 @@ request to any endpoint without leaving the browser:
 The generated command is masked by default and copies with the real token. The
 designer only *builds* commands — it never sends mutating requests from the
 browser, keeping the dashboard read-only. For the full endpoint reference, see
-[API.md](API.md).
+[API.md](docs/API.md).
 
 ## Cipher policy
 
@@ -337,3 +337,29 @@ available. Certificates are signed with SHA-384. The leaf cert validity cap is
 
 Forbidden: RC4, 3DES, MD5, SHA-1 signatures, RSA key exchange, export ciphers,
 NULL ciphers.
+
+## Development
+
+Install the dev tooling (Ruff + pytest) into the venv:
+
+```bash
+uv sync --extra dev
+```
+
+Lint, autofix, and format with [Ruff](https://docs.astral.sh/ruff/):
+
+```bash
+uv run ruff check .          # lint
+uv run ruff check --fix .    # lint and apply safe autofixes
+uv run ruff format .         # format in place
+uv run ruff format --check . # verify formatting (what CI runs)
+```
+
+Run the tests:
+
+```bash
+uv run pytest
+```
+
+CI runs the same `ruff check`, `ruff format --check`, and `pytest` on every push
+and pull request (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).

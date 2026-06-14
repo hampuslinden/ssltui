@@ -33,7 +33,7 @@ dependencies = [
 
 [project.optional-dependencies]
 api = ["flask>=3.0"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.urls]
 Homepage = "https://github.com/hampuslinden/ssltui"
@@ -49,7 +49,24 @@ packages = ["ssltui"]
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.6",
 ]
 
 [tool.hatch.version]
 path = "ssltui/__init__.py"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["ssltui", "tests"]
+extend-exclude = [".venv", "dist", "build"]
+
+[tool.ruff.lint]
+# pycodestyle errors/warnings, pyflakes, import sorting, pyupgrade, bugbear.
+select = ["E", "F", "W", "I", "UP", "B"]
+# Line length is owned by the formatter; E501 only nags on long strings/comments
+# the formatter cannot split, so disable it (Ruff's recommended pattern).
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ssltui"]
