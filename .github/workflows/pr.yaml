@@ -33,7 +33,17 @@ jobs:
         run: uv sync --all-extras
       - name: Run tests
         run: |
-          sudo apt install tmux
+          which tmux > /dev/null || sudo apt install -y tmux
+          mkdir -p test-results
           echo "::startgroup::Running tests"
-          uv run pytest -v
+          uv run pytest -v \
+            --junitxml=test-results/junit.xml \
+            | tee test-results/pytest.log
           echo "::endgroup::Running tests"
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: test-results/
+          retention-days: 30

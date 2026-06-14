@@ -19,6 +19,9 @@ data/
 *.key
 *.pem
 
+# Test results
+test-results/
+
 # Build artifacts
 *.tar.gz
 *.tgz
