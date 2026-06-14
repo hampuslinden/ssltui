@@ -35,8 +35,8 @@ def ca_cert_path(root: Path) -> Path:
     return root / "ca.crt"
 
 
-def index_path(root: Path) -> Path:
-    return root / "index.json"
+def db_path(root: Path) -> Path:
+    return root / "ca.db"
 
 
 def cert_dir(root: Path, cn: str) -> Path:

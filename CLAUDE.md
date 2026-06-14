@@ -98,7 +98,7 @@ Default: `~/.local/share/ssltui/` (overridden via `SSLTUI_DIR` env var or `--dir
 $SSLTUI_DIR/
 ├── ca.key          # CA private key (chmod 600)
 ├── ca.crt          # CA certificate (self-signed)
-├── index.json      # issued cert metadata (CN, SANs, serial, expiry, paths)
+├── ca.db           # SQLite store: cert index, revocations, event log, counters
 ├── certs/
 │   ├── <cn>/
 │   │   ├── cert.crt
@@ -107,6 +107,24 @@ $SSLTUI_DIR/
 │   └── ...
 └── ca.crl          # certificate revocation list (PEM, regenerated on each revocation)
 ```
+
+### Metadata store (`ca.db`)
+
+All cert metadata, revocations, counters (serial / CRL number), and an
+append-only **event log** live in a single SQLite database (`ssltui/store.py`),
+replacing the earlier `index.json`. WAL mode plus a busy timeout let the TUI,
+the cron `--renew` process, and the multi-threaded Flask API read and write
+concurrently without explicit file locking. Cert/key material itself stays as
+flat PEM files under `certs/<cn>/`.
+
+Tables: `certs` (CN → metadata JSON), `revoked` (serial → JSON), `events`
+(`id`, `ts`, `type`, `cn`, `method`, `detail`), and `meta` (serial, crl_number,
+server_fqdn, and a `version` counter the dashboard/TUI watchers poll to refresh).
+
+Events record lifecycle actions (`issue`, `renew`, `revoke`) and every private
+**key access** (`key_download`), each tagged with the originating `method`
+(`api` / `tui` / `cli` / `cron`). The events table is the system of record for
+the dashboard and TUI live activity logs.
 
 ## Renewal
 

@@ -113,19 +113,34 @@ class EventLog:
             return result, self._seq
 
 
+# Event type \u2192 (dashboard level, human label) for rendering stored events.
+_EVENT_RENDER: dict[str, tuple[str, str]] = {
+    "issue": ("success", "issued"),
+    "renew": ("info", "renewed"),
+    "revoke": ("warning", "revoked"),
+    "key_download": ("warning", "key downloaded"),
+    "ca_init": ("error", "CA re-initialised"),
+}
+
+
+def _format_event(ev: dict) -> tuple[str, str]:
+    """Map a stored event row to a (level, message) pair for the dashboard log."""
+    level, label = _EVENT_RENDER.get(ev["type"], ("dim", ev["type"]))
+    method = ev.get("method")
+    suffix = f" ({method})" if method else ""
+    cn = ev.get("cn")
+    msg = f"{label}{suffix}: {cn}" if cn else f"{label}{suffix}"
+    return level, msg
+
+
 def _write_historical_events(root: Path, event_log: EventLog) -> None:
-    """Seed the event log with recent cert history so the dashboard shows context."""
+    """Seed the event log from the persisted events table so the dashboard has context."""
     try:
-        events: list[tuple[str, str, str]] = []
-        for cert in store.list_certs(root):
-            ts = cert["issued"][:10]
-            events.append((cert["issued"], "dim", f"[{ts}] issued: {cert['cn']}"))
-        for rev in store.list_revoked(root):
-            ts = rev["revoked_at"][:10]
-            events.append((rev["revoked_at"], "dim", f"[{ts}] revoked: {rev['cn']}"))
-        events.sort(key=lambda e: e[0])
-        for _, level, msg in events[-20:]:
-            event_log.add(level, msg)
+        events = store.list_events(root, limit=20)
+        for ev in events:
+            level, msg = _format_event(ev)
+            day = (ev.get("ts") or "")[:10]
+            event_log.add(level, f"[{day}] {msg}" if day else msg)
         if events:
             event_log.add("dim", "\u2500" * 24 + " live")
     except Exception:
@@ -133,7 +148,12 @@ def _write_historical_events(root: Path, event_log: EventLog) -> None:
 
 
 def _start_fs_watcher(root: Path, event_log: EventLog) -> None:
-    """Start a daemon thread that detects cert and CA changes and logs them."""
+    """Daemon thread that surfaces new events (and CA/CRL changes) on the dashboard.
+
+    Cert lifecycle and key-download events come from the persisted events table,
+    polled via the store version counter; CA re-init and CRL regeneration are
+    still detected by file mtime since they don't always write an event row.
+    """
 
     def _mtime(p: Path) -> float:
         try:
@@ -141,14 +161,16 @@ def _start_fs_watcher(root: Path, event_log: EventLog) -> None:
         except OSError:
             return 0.0
 
-    def _snapshot() -> dict[str, dict]:
+    def _last_event_id() -> int:
         try:
-            return {c["cn"]: c for c in store.list_certs(root)}
+            evs = store.list_events(root, limit=1)
+            return evs[-1]["id"] if evs else 0
         except Exception:
-            return {}
+            return 0
 
     state: dict = {
-        "cns": _snapshot(),
+        "version": _safe_version(root),
+        "last_id": _last_event_id(),
         "ca_mtime": _mtime(config.ca_cert_path(root)),
         "crl_mtime": _mtime(config.crl_path(root)),
     }
@@ -157,16 +179,15 @@ def _start_fs_watcher(root: Path, event_log: EventLog) -> None:
         while True:
             time.sleep(5)
             try:
-                current = _snapshot()
-                old = state["cns"]
-                for cn in set(current) - set(old):
-                    event_log.add("success", f"cert issued: {cn}")
-                for cn in set(old) - set(current):
-                    event_log.add("warning", f"cert revoked: {cn}")
-                for cn in set(current) & set(old):
-                    if current[cn].get("serial") != old[cn].get("serial"):
-                        event_log.add("info", f"cert renewed: {cn}")
-                state["cns"] = current
+                version = _safe_version(root)
+                if version != state["version"]:
+                    state["version"] = version
+                    for ev in store.list_events(root, limit=100):
+                        if ev["id"] <= state["last_id"]:
+                            continue
+                        level, msg = _format_event(ev)
+                        event_log.add(level, msg)
+                        state["last_id"] = ev["id"]
 
                 ca_mtime = _mtime(config.ca_cert_path(root))
                 if ca_mtime and ca_mtime != state["ca_mtime"]:
@@ -181,6 +202,13 @@ def _start_fs_watcher(root: Path, event_log: EventLog) -> None:
                 pass
 
     threading.Thread(target=_poll, daemon=True, name="ssltui-fs-watcher").start()
+
+
+def _safe_version(root: Path) -> int:
+    try:
+        return store.get_version(root)
+    except Exception:
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -400,7 +428,6 @@ td{padding:4px 8px;vertical-align:middle}
   </div>
   <div id="hdr-r">
     <button class="btn" onclick="openDesigner()">API Designer</button>
-    <button class="btn" onclick="openIssueModal()">Issue example</button>
     <a href="/dashboard/logout" class="btn btn-d">Logout</a>
   </div>
 </div>
@@ -408,8 +435,8 @@ td{padding:4px 8px;vertical-align:middle}
   <span id="sdot">&#9679;</span>
   API on <strong>{{ server_url | e }}</strong>
   &nbsp;&middot;&nbsp; CA root: {{ ca_root | e }}
-  &nbsp;&middot;&nbsp; <a href="/dashboard/ca/ca.crt" download="ca.crt" class="btn" style="padding:1px 6px;font-size:11px">&#8595; Root CA cert</a>
-  &nbsp;&middot;&nbsp; <a href="/dashboard/ca/crl.pem" download="ca.crl" class="btn" style="padding:1px 6px;font-size:11px">&#8595; CRL</a>
+  &nbsp;&middot;&nbsp; <a href="#" data-dl="/dashboard/ca/ca.crt" data-name="ca.crt" class="btn ca-dl" style="padding:1px 6px;font-size:11px">&#8595; Root CA cert</a>
+  &nbsp;&middot;&nbsp; <a href="#" data-dl="/dashboard/ca/crl.pem" data-name="ca.crl" class="btn ca-dl" style="padding:1px 6px;font-size:11px">&#8595; CRL</a>
 </div>
 <div id="main">
   <div id="cpanel">
@@ -530,7 +557,11 @@ td{padding:4px 8px;vertical-align:middle}
 const ESC = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const _tok = {{ server_token | tojson }};
 
-const CERT_EVENTS = /^(cert issued|cert renewed|cert revoked|API: issued|API: renewed)/;
+// Event messages that change the cert list (see _format_event server-side):
+// "issued (api): cn", "renewed (cron): cn", "revoked (tui): cn", and the
+// historical "[2026-06-14] issued (api): cn" variant. "key downloaded" and
+// "CA re-initialised" deliberately don't match — they don't alter the table.
+const CERT_EVENTS = /(?:^|\\] )(?:issued|renewed|revoked)\\b/;
 
 function dcls(d) {
   if (d < 0) return 'expired';
@@ -598,6 +629,14 @@ async function loadCerts() {
   }
 }
 
+// Coalesce reloads: connecting to the SSE stream replays recent history, so a
+// burst of cert events shouldn't fire one fetch each.
+let _certReloadTimer = null;
+function scheduleCertReload() {
+  if (_certReloadTimer) return;
+  _certReloadTimer = setTimeout(() => { _certReloadTimer = null; loadCerts(); }, 150);
+}
+
 const elog = document.getElementById('elog');
 
 function appendEv(ev) {
@@ -620,7 +659,7 @@ function connectSSE() {
   evSrc.onmessage = e => {
     const ev = JSON.parse(e.data);
     appendEv(ev);
-    if (CERT_EVENTS.test(ev.msg)) loadCerts();
+    if (CERT_EVENTS.test(ev.msg)) scheduleCertReload();
   };
   evSrc.onerror = () => {
     evSrc.close();
@@ -1000,6 +1039,39 @@ document.getElementById('imodal-bg').addEventListener('click', e => {
 document.getElementById('admodal-bg').addEventListener('click', e => {
   if (e.target === document.getElementById('admodal-bg')) closeDesigner();
 });
+// Root CA cert / CRL: fetch into a blob and save it, rather than navigating
+// the browser straight to the HTTPS URL. A direct download over a connection
+// whose certificate the browser doesn't trust yet (the local CA being exactly
+// what's downloaded here) is blocked by Chrome as a "network error"; a same-page
+// blob save isn't subject to the origin connection's trust state.
+async function caDownload(url, filename) {
+  try {
+    const r = await fetch(url);
+    if (r.status === 401) { showAuthError(); return; }
+    if (!r.ok) {
+      let msg = 'Download failed (' + r.status + ')';
+      try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (e) {}
+      alert(msg);
+      return;
+    }
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  } catch (e) {
+    alert('Download error: ' + e.message);
+  }
+}
+document.querySelectorAll('a.ca-dl').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    caDownload(a.dataset.dl, a.dataset.name);
+  });
+});
+
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeKeyModal(); closePemModal(); closeIssueModal(); closeDesigner(); } });
 
 loadCerts();
@@ -1171,6 +1243,14 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
         cn = (body.get("cn") or "").strip()
         if not cn:
             abort(400, description="cn is required")
+        if store.get_cert(root, cn) is not None:
+            abort(
+                409,
+                description=(
+                    f"a certificate for {cn!r} already exists; "
+                    "revoke it before issuing a new one"
+                ),
+            )
         try:
             meta = issue_cert(
                 root,
@@ -1178,10 +1258,10 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
                 sans=body.get("sans") or [],
                 key_type=body.get("key_type", "ec"),
                 validity_days=int(body.get("validity_days", config.LEAF_VALIDITY_DAYS)),
+                method="api",
             )
         except (CAError, ValueError) as exc:
             abort(400, description=str(exc))
-        _event_log.add("success", f"API: issued {meta['cn']}")  # type: ignore[index]
         return jsonify(meta), 201  # type: ignore[return-value]
 
     @app.get("/api/v1/certs/<cn>")
@@ -1192,10 +1272,9 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
     def renew(cn: str):
         _entry_or_404(cn)
         try:
-            meta = renew_cert(root, cn)
+            meta = renew_cert(root, cn, method="api")
         except CAError as exc:
             abort(400, description=str(exc))
-        _event_log.add("info", f"API: renewed {cn}")
         return jsonify(meta)  # type: ignore[return-value]
 
     @app.get("/api/v1/certs/<cn>/cert.pem")
@@ -1206,7 +1285,7 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
     @app.get("/api/v1/certs/<cn>/key.pem")
     def download_key(cn: str):
         entry = _entry_or_404(cn)
-        _event_log.add("warning", f"key downloaded: {cn}")
+        store.add_event(root, "key_download", cn=cn, method="api")
         return _pem_response(Path(entry["key"]), f"{_safe(cn)}.key")
 
     @app.get("/api/v1/certs/<cn>/chain.pem")

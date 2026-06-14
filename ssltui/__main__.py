@@ -41,6 +41,9 @@ def _build_parser() -> argparse.ArgumentParser:
     issue.add_argument("--key-type", choices=["ec", "rsa"], default="ec")
     issue.add_argument("--days", type=int, default=180)
 
+    # audit
+    sub.add_parser("audit", help="Print the full stored event log")
+
     # serve
     serve = sub.add_parser("serve", help="Start the REST API server (requires Flask)")
     serve.add_argument(
@@ -104,7 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_SUBCMDS = frozenset({"renew", "status", "issue", "serve", "get", "getroot"})
+_SUBCMDS = frozenset({"renew", "status", "issue", "audit", "serve", "get", "getroot"})
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -129,6 +132,8 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_status()
     elif args.cmd == "issue":
         _cmd_issue(args)
+    elif args.cmd == "audit":
+        _cmd_audit()
     elif args.cmd == "serve":
         _cmd_serve(args)
     elif args.cmd == "get":
@@ -152,7 +157,7 @@ def _cmd_renew(args) -> None:
 
     if args.cert:
         try:
-            renew_cert(root, args.cert)
+            renew_cert(root, args.cert, method="cron")
             print(f"OK renewed {args.cert}")
         except CAError as exc:
             print(f"ERROR {args.cert}: {exc}", file=sys.stderr)
@@ -215,6 +220,7 @@ def _cmd_issue(args) -> None:
             sans=args.san,
             key_type=args.key_type,
             validity_days=args.days,
+            method="cli",
         )
         print(f"OK issued {meta['cn']}")
         print(f"  cert:  {meta['cert']}")
@@ -223,6 +229,31 @@ def _cmd_issue(args) -> None:
     except CAError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
+
+
+def _cmd_audit() -> None:
+    from ssltui import config, store
+
+    root = config.data_dir()
+    events = store.list_events(root, limit=None)
+
+    if not events:
+        print("No events recorded.")
+        return
+
+    fmt = "{:<34} {:<13} {:<8} {:<30} {}"
+    print(fmt.format("TIMESTAMP", "TYPE", "METHOD", "CN", "DETAIL"))
+    print("-" * 103)
+    for ev in events:
+        print(
+            fmt.format(
+                ev.get("ts") or "",
+                ev.get("type") or "",
+                ev.get("method") or "-",
+                ev.get("cn") or "-",
+                ev.get("detail") or "",
+            )
+        )
 
 
 def _cmd_serve(args) -> None:
