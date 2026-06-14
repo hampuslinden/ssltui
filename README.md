@@ -158,6 +158,18 @@ uv run ssltui renew --cert myapp.local
 uv run ssltui issue --cn api.local --san www.api.local --san 10.0.0.1 --days 365
 ```
 
+### Get the root CA certificate
+
+Print the root CA certificate (PEM) to stdout — handy for piping into a trust
+store. A short summary is written to stderr when run interactively, so the
+redirected output stays a clean PEM:
+
+```bash
+uv run ssltui getroot > local-ca.crt
+# or write it directly
+uv run ssltui getroot --out local-ca.crt
+```
+
 ### Cron entry
 
 Install via the TUI's **Cron Schedule** option, or add manually:
