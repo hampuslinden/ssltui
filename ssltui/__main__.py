@@ -91,10 +91,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Write to FILE instead of stdout (recommended for keys)",
     )
 
+    # getroot
+    getroot = sub.add_parser(
+        "getroot", help="Print the root CA certificate (PEM) to stdout"
+    )
+    getroot.add_argument(
+        "--out",
+        metavar="FILE",
+        help="Write the CA cert to FILE instead of stdout",
+    )
+
     return p
 
 
-_SUBCMDS = frozenset({"renew", "status", "issue", "serve", "get"})
+_SUBCMDS = frozenset({"renew", "status", "issue", "serve", "get", "getroot"})
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -123,6 +133,8 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_serve(args)
     elif args.cmd == "get":
         _cmd_get(args)
+    elif args.cmd == "getroot":
+        _cmd_getroot(args)
     else:
         # Default: interactive TUI
         from ssltui.tui import run_tui
@@ -357,6 +369,40 @@ def _cmd_get(args) -> None:
                 file=sys.stderr,
             )
         sys.stdout.buffer.write(data)
+
+
+def _cmd_getroot(args) -> None:
+    from ssltui import config
+    from ssltui.ca import CAError, ca_expiry, ca_fingerprint, ca_subject
+
+    root = config.data_dir()
+    ca_path = config.ca_cert_path(root)
+    if not ca_path.exists():
+        print(f"ERROR: CA not initialised at {root}.", file=sys.stderr)
+        sys.exit(1)
+
+    data = ca_path.read_bytes()
+
+    if args.out:
+        out = Path(args.out)
+        out.write_bytes(data)
+        out.chmod(0o644)
+        print(f"Written to {out}")
+        return
+
+    # When writing to a terminal, print a short summary to stderr so stdout
+    # stays a clean PEM that can be piped or redirected.
+    if sys.stdout.isatty():
+        try:
+            print(
+                f"Root CA: {ca_subject(root)}\n"
+                f"Expires: {ca_expiry(root)}\n"
+                f"SHA256:  {ca_fingerprint(root)}",
+                file=sys.stderr,
+            )
+        except CAError:
+            pass
+    sys.stdout.buffer.write(data)
 
 
 if __name__ == "__main__":
