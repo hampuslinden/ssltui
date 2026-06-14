@@ -30,3 +30,11 @@ Goal: `ssltui` behaves like a first-class system tool, not just a Python entry p
 - [ ] Provide a man page (`man ssltui`) and shell completions (bash/zsh/fish).
 - [ ] Optional `systemd` user units for the API/dashboard serve mode and a
       timer-based alternative to the cron renewal entry.
+
+## Test coverage
+
+## Improve test harness
+
+- [ ] Add a test harness for the CLI
+- [ ] Add a test harness for the TUI
+- [ ] Add a web test harness for the API

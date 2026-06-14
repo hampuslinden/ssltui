@@ -18,8 +18,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # --renew
     renew = sub.add_parser("renew", help="Renew expiring certs (cron-safe)")
     renew.add_argument("--cert", metavar="CN", help="Renew a specific cert by CN")
-    renew.add_argument("--threshold", type=int, default=30,
-                       help="Renew certs expiring within N days (default 30)")
+    renew.add_argument(
+        "--threshold",
+        type=int,
+        default=30,
+        help="Renew certs expiring within N days (default 30)",
+    )
 
     # --status
     sub.add_parser("status", help="Print expiry table and exit")
@@ -27,25 +31,49 @@ def _build_parser() -> argparse.ArgumentParser:
     # --issue
     issue = sub.add_parser("issue", help="Issue a cert non-interactively")
     issue.add_argument("--cn", required=True, help="Common name")
-    issue.add_argument("--san", action="append", default=[], metavar="SAN",
-                       help="Subject Alternative Name (repeatable)")
+    issue.add_argument(
+        "--san",
+        action="append",
+        default=[],
+        metavar="SAN",
+        help="Subject Alternative Name (repeatable)",
+    )
     issue.add_argument("--key-type", choices=["ec", "rsa"], default="ec")
     issue.add_argument("--days", type=int, default=180)
 
     # serve
     serve = sub.add_parser("serve", help="Start the REST API server (requires Flask)")
-    serve.add_argument("--host", default="127.0.0.1",
-                       help="Bind address; use 0.0.0.0 for all interfaces (default 127.0.0.1)")
-    serve.add_argument("--port", type=int, default=8080, help="HTTP port (default 8080)")
-    serve.add_argument("--https-port", dest="https_port", type=int, default=8443,
-                       help="HTTPS port (default 8443); used when a server cert is configured")
-    serve.add_argument("--debug", action="store_true",
-                       help="Enable Flask debug mode. Do not use in production")
-    serve.add_argument("--no-threaded", dest="threaded", action="store_false",
-                       help="Handle one request at a time instead of threading (threaded is the default)")
+    serve.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind address; use 0.0.0.0 for all interfaces (default 127.0.0.1)",
+    )
+    serve.add_argument(
+        "--port", type=int, default=8080, help="HTTP port (default 8080)"
+    )
+    serve.add_argument(
+        "--https-port",
+        dest="https_port",
+        type=int,
+        default=8443,
+        help="HTTPS port (default 8443); used when a server cert is configured",
+    )
+    serve.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable Flask debug mode. Do not use in production",
+    )
+    serve.add_argument(
+        "--no-threaded",
+        dest="threaded",
+        action="store_false",
+        help="Handle one request at a time instead of threading (threaded is the default)",
+    )
 
     # get
-    get = sub.add_parser("get", help="Print or save a cert, key, chain, or full PEM bundle")
+    get = sub.add_parser(
+        "get", help="Print or save a cert, key, chain, or full PEM bundle"
+    )
     get.add_argument("--cn", default=None, help="Common name of the certificate")
     get.add_argument(
         "--what",
@@ -58,7 +86,8 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     get.add_argument(
-        "--out", metavar="FILE",
+        "--out",
+        metavar="FILE",
         help="Write to FILE instead of stdout (recommended for keys)",
     )
 
@@ -97,13 +126,14 @@ def main(argv: list[str] | None = None) -> None:
     else:
         # Default: interactive TUI
         from ssltui.tui import run_tui
+
         run_tui()
 
 
 def _cmd_renew(args) -> None:
     from ssltui import config
-    from ssltui.ca import renew_cert, CAError
-    from ssltui.renewal import renew_all, refresh_crl
+    from ssltui.ca import CAError, renew_cert
+    from ssltui.renewal import refresh_crl, renew_all
 
     root = config.data_dir()
     exit_code = 0
@@ -163,12 +193,17 @@ def _cmd_status() -> None:
 
 def _cmd_issue(args) -> None:
     from ssltui import config
-    from ssltui.ca import issue_cert, CAError
+    from ssltui.ca import CAError, issue_cert
 
     root = config.data_dir()
     try:
-        meta = issue_cert(root, cn=args.cn, sans=args.san,
-                          key_type=args.key_type, validity_days=args.days)
+        meta = issue_cert(
+            root,
+            cn=args.cn,
+            sans=args.san,
+            key_type=args.key_type,
+            validity_days=args.days,
+        )
         print(f"OK issued {meta['cn']}")
         print(f"  cert:  {meta['cert']}")
         print(f"  key:   {meta['key']}")
@@ -180,12 +215,18 @@ def _cmd_issue(args) -> None:
 
 def _cmd_serve(args) -> None:
     import sys
+
     from ssltui import config
     from ssltui.api import run_server
 
     if not sys.stdout.isatty():
-        run_server(host=args.host, port=args.port, https_port=args.https_port,
-                   debug=args.debug, threaded=args.threaded)
+        run_server(
+            host=args.host,
+            port=args.port,
+            https_port=args.https_port,
+            debug=args.debug,
+            threaded=args.threaded,
+        )
         return
 
     from ssltui.api import APIServer, _resolve_token, server_ssl_context
@@ -198,15 +239,21 @@ def _cmd_serve(args) -> None:
     token = _resolve_token(root)
     ctx, _fqdn = server_ssl_context(root)
     try:
-        server = APIServer(host=args.host, port=args.port, token=token, root=root,
-                           threaded=args.threaded,
-                           https_port=args.https_port if ctx is not None else None,
-                           ssl_context=ctx)
+        server = APIServer(
+            host=args.host,
+            port=args.port,
+            token=token,
+            root=root,
+            threaded=args.threaded,
+            https_port=args.https_port if ctx is not None else None,
+            ssl_context=ctx,
+        )
     except OSError as exc:
         print(f"Error starting API server: {exc}", file=sys.stderr)
         sys.exit(1)
 
     from ssltui.tui import ServeApp
+
     ServeApp(server, token).run()
 
 
@@ -286,8 +333,6 @@ def _cmd_get(args) -> None:
     if entry is None:
         print(f"ERROR: no cert found for CN={cn!r}", file=sys.stderr)
         sys.exit(1)
-
-    safe_cn = cn.replace("*", "wildcard").replace("/", "_")
 
     if what == "cert":
         data = Path(entry["cert"]).read_bytes()

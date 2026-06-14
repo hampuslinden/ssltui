@@ -12,15 +12,15 @@ import shutil
 import socket
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ssltui import config
 
-
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
+
 
 class CAError(Exception):
     """Raised when an openssl command fails or the CA is in an invalid state."""
@@ -29,6 +29,7 @@ class CAError(Exception):
 # ---------------------------------------------------------------------------
 # Low-level openssl wrapper
 # ---------------------------------------------------------------------------
+
 
 def run_openssl(args: list[str], input: bytes | None = None) -> bytes:
     """Run openssl with *args*, return stdout bytes, raise CAError on failure."""
@@ -46,6 +47,7 @@ def run_openssl(args: list[str], input: bytes | None = None) -> bytes:
 # ---------------------------------------------------------------------------
 # CA initialisation
 # ---------------------------------------------------------------------------
+
 
 def init_ca(
     root: Path,
@@ -70,38 +72,68 @@ def init_ca(
     cert_path = config.ca_cert_path(root)
 
     if key_path.exists() and cert_path.exists():
-        raise CAError("CA already initialised. Delete ca.key and ca.crt to reinitialise.")
+        raise CAError(
+            "CA already initialised. Delete ca.key and ca.crt to reinitialise."
+        )
 
     if subject is None:
         subject = config.CA_SUBJECT
 
     # --- Generate key ---
     if key_type == "ec":
-        run_openssl(["genpkey", "-algorithm", "EC",
-                     "-pkeyopt", f"ec_paramgen_curve:{config.EC_CURVE}",
-                     "-out", str(key_path)])
+        run_openssl(
+            [
+                "genpkey",
+                "-algorithm",
+                "EC",
+                "-pkeyopt",
+                f"ec_paramgen_curve:{config.EC_CURVE}",
+                "-out",
+                str(key_path),
+            ]
+        )
     elif key_type == "rsa":
-        run_openssl(["genpkey", "-algorithm", "RSA",
-                     "-pkeyopt", f"rsa_keygen_bits:{config.RSA_BITS}",
-                     "-out", str(key_path)])
+        run_openssl(
+            [
+                "genpkey",
+                "-algorithm",
+                "RSA",
+                "-pkeyopt",
+                f"rsa_keygen_bits:{config.RSA_BITS}",
+                "-out",
+                str(key_path),
+            ]
+        )
     else:
         raise CAError(f"Unknown key type: {key_type!r}. Use 'ec' or 'rsa'.")
 
     key_path.chmod(0o600)
 
     # --- Self-sign CA certificate ---
-    run_openssl([
-        "req", "-new", "-x509",
-        "-key", str(key_path),
-        "-out", str(cert_path),
-        "-days", str(config.CA_VALIDITY_DAYS),
-        "-subj", subject,
-        "-sha384",
-        "-extensions", "v3_ca",
-        "-addext", "basicConstraints=critical,CA:TRUE",
-        "-addext", "keyUsage=critical,keyCertSign,cRLSign",
-        "-addext", "subjectKeyIdentifier=hash",
-    ])
+    run_openssl(
+        [
+            "req",
+            "-new",
+            "-x509",
+            "-key",
+            str(key_path),
+            "-out",
+            str(cert_path),
+            "-days",
+            str(config.CA_VALIDITY_DAYS),
+            "-subj",
+            subject,
+            "-sha384",
+            "-extensions",
+            "v3_ca",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+            "-addext",
+            "keyUsage=critical,keyCertSign,cRLSign",
+            "-addext",
+            "subjectKeyIdentifier=hash",
+        ]
+    )
     cert_path.chmod(0o644)
     generate_crl(root)
 
@@ -118,12 +150,14 @@ def init_ca(
         # the FQDN.
         issue_cert(root, cn=server_fqdn, sans=local_ip_sans(), key_type=key_type)
         from ssltui.store import set_server_fqdn
+
         set_server_fqdn(root, server_fqdn)
 
 
 # ---------------------------------------------------------------------------
 # Certificate issuance
 # ---------------------------------------------------------------------------
+
 
 def issue_cert(
     root: Path,
@@ -154,26 +188,48 @@ def issue_cert(
 
     # --- Generate key ---
     if key_type == "ec":
-        run_openssl(["genpkey", "-algorithm", "EC",
-                     "-pkeyopt", f"ec_paramgen_curve:{config.EC_CURVE}",
-                     "-out", str(key_path)])
+        run_openssl(
+            [
+                "genpkey",
+                "-algorithm",
+                "EC",
+                "-pkeyopt",
+                f"ec_paramgen_curve:{config.EC_CURVE}",
+                "-out",
+                str(key_path),
+            ]
+        )
     elif key_type == "rsa":
-        run_openssl(["genpkey", "-algorithm", "RSA",
-                     "-pkeyopt", f"rsa_keygen_bits:{config.RSA_BITS}",
-                     "-out", str(key_path)])
+        run_openssl(
+            [
+                "genpkey",
+                "-algorithm",
+                "RSA",
+                "-pkeyopt",
+                f"rsa_keygen_bits:{config.RSA_BITS}",
+                "-out",
+                str(key_path),
+            ]
+        )
     else:
         raise CAError(f"Unknown key type: {key_type!r}.")
 
     key_path.chmod(0o600)
 
     # --- Generate CSR ---
-    run_openssl([
-        "req", "-new",
-        "-key", str(key_path),
-        "-out", str(csr_path),
-        "-subj", f"/CN={cn}",
-        "-sha384",
-    ])
+    run_openssl(
+        [
+            "req",
+            "-new",
+            "-key",
+            str(key_path),
+            "-out",
+            str(csr_path),
+            "-subj",
+            f"/CN={cn}",
+            "-sha384",
+        ]
+    )
 
     # --- Sign with CA using a temporary ext file ---
     ext_content = _build_ext_file(san_ext)
@@ -182,21 +238,33 @@ def issue_cert(
         ext_file = f.name
 
     from ssltui.store import next_serial
+
     serial_num = next_serial(root)
 
     try:
-        run_openssl([
-            "x509", "-req",
-            "-in", str(csr_path),
-            "-CA", str(config.ca_cert_path(root)),
-            "-CAkey", str(config.ca_key_path(root)),
-            "-set_serial", str(serial_num),
-            "-out", str(cert_path),
-            "-days", str(validity_days),
-            "-sha384",
-            "-extfile", ext_file,
-            "-extensions", "req_ext",
-        ])
+        run_openssl(
+            [
+                "x509",
+                "-req",
+                "-in",
+                str(csr_path),
+                "-CA",
+                str(config.ca_cert_path(root)),
+                "-CAkey",
+                str(config.ca_key_path(root)),
+                "-set_serial",
+                str(serial_num),
+                "-out",
+                str(cert_path),
+                "-days",
+                str(validity_days),
+                "-sha384",
+                "-extfile",
+                ext_file,
+                "-extensions",
+                "req_ext",
+            ]
+        )
     finally:
         os.unlink(ext_file)
         csr_path.unlink(missing_ok=True)
@@ -217,7 +285,7 @@ def issue_cert(
         "sans": san_list,
         "key_type": key_type,
         "serial": serial,
-        "issued": datetime.now(timezone.utc).isoformat(),
+        "issued": datetime.now(UTC).isoformat(),
         "expiry": expiry,
         "validity_days": validity_days,
         "cert": str(cert_path),
@@ -226,6 +294,7 @@ def issue_cert(
     }
 
     from ssltui.store import add_cert
+
     add_cert(root, metadata)
 
     return metadata
@@ -234,6 +303,7 @@ def issue_cert(
 # ---------------------------------------------------------------------------
 # Renewal
 # ---------------------------------------------------------------------------
+
 
 def renew_cert(root: Path, cn: str) -> dict:
     """Re-issue a cert for *cn*, preserving its key type and SANs."""
@@ -251,12 +321,17 @@ def renew_cert(root: Path, cn: str) -> dict:
             p.unlink()
 
     from ssltui.store import remove_cert
+
     remove_cert(root, cn)
 
     return issue_cert(
         root,
         cn=entry["cn"],
-        sans=[s for s in entry["sans"] if not s.startswith("DNS:" + cn) and s != f"IP:{cn}"],
+        sans=[
+            s
+            for s in entry["sans"]
+            if not s.startswith("DNS:" + cn) and s != f"IP:{cn}"
+        ],
         key_type=entry.get("key_type", "ec"),
         validity_days=entry.get("validity_days", config.LEAF_VALIDITY_DAYS),
     )
@@ -266,20 +341,24 @@ def renew_cert(root: Path, cn: str) -> dict:
 # Revocation
 # ---------------------------------------------------------------------------
 
+
 def revoke_cert(root: Path, cn: str) -> None:
     """Revoke a cert, update ca.crl, delete its files, and remove it from the store."""
-    from ssltui.store import get_cert, remove_cert, add_revoked
+    from ssltui.store import add_revoked, get_cert, remove_cert
 
     entry = get_cert(root, cn)
     if entry is None:
         raise CAError(f"No cert found for CN={cn!r}.")
 
-    add_revoked(root, {
-        "cn": cn,
-        "serial": entry["serial"],
-        "expiry": entry["expiry"],
-        "revoked_at": datetime.now(timezone.utc).isoformat(),
-    })
+    add_revoked(
+        root,
+        {
+            "cn": cn,
+            "serial": entry["serial"],
+            "expiry": entry["expiry"],
+            "revoked_at": datetime.now(UTC).isoformat(),
+        },
+    )
     generate_crl(root)
 
     cd = config.cert_dir(root, cn)
@@ -315,18 +394,25 @@ def generate_crl(root: Path) -> Path:
             seen.add(serial)
             expiry = _to_openssl_date(r["expiry"])
             revoked_at = _to_openssl_date(r["revoked_at"])
-            lines.append(f"R\t{expiry}\t{revoked_at}\t{serial}\tunknown\t/CN={r['cn']}\n")
+            lines.append(
+                f"R\t{expiry}\t{revoked_at}\t{serial}\tunknown\t/CN={r['cn']}\n"
+            )
         (tmpdir / "index.txt").write_text("".join(lines))
         (tmpdir / "index.txt.attr").write_text("unique_subject = no\n")
         (tmpdir / "crlnumber").write_text(f"{crl_num:04X}\n")
         (tmpdir / "openssl.cnf").write_text(_build_crl_config(tmpdir, root))
 
         crl_tmp = tmpdir / "crl.pem"
-        run_openssl([
-            "ca", "-gencrl",
-            "-config", str(tmpdir / "openssl.cnf"),
-            "-out", str(crl_tmp),
-        ])
+        run_openssl(
+            [
+                "ca",
+                "-gencrl",
+                "-config",
+                str(tmpdir / "openssl.cnf"),
+                "-out",
+                str(crl_tmp),
+            ]
+        )
 
         dest = config.crl_path(root)
         with open(dest, "ab") as f:
@@ -340,27 +426,39 @@ def generate_crl(root: Path) -> Path:
 # CA info helpers
 # ---------------------------------------------------------------------------
 
+
 def ca_fingerprint(root: Path) -> str:
-    out = run_openssl(["x509", "-noout", "-fingerprint", "-sha256",
-                       "-in", str(config.ca_cert_path(root))])
+    out = run_openssl(
+        [
+            "x509",
+            "-noout",
+            "-fingerprint",
+            "-sha256",
+            "-in",
+            str(config.ca_cert_path(root)),
+        ]
+    )
     return out.decode().strip().split("=", 1)[-1]
 
 
 def ca_expiry(root: Path) -> str:
-    out = run_openssl(["x509", "-noout", "-enddate",
-                       "-in", str(config.ca_cert_path(root))])
+    out = run_openssl(
+        ["x509", "-noout", "-enddate", "-in", str(config.ca_cert_path(root))]
+    )
     return out.decode().strip().split("=", 1)[-1]
 
 
 def ca_subject(root: Path) -> str:
-    out = run_openssl(["x509", "-noout", "-subject",
-                       "-in", str(config.ca_cert_path(root))])
+    out = run_openssl(
+        ["x509", "-noout", "-subject", "-in", str(config.ca_cert_path(root))]
+    )
     return out.decode().strip().split("=", 1)[-1]
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def local_ip_sans() -> list[str]:
     """Return ``IP:`` SAN entries for the loopback and primary local addresses.
@@ -432,6 +530,7 @@ def _build_san_list(cn: str, extra_sans: list[str] | None) -> list[str]:
 
 def _looks_like_ip(s: str) -> bool:
     import re
+
     return bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", s))
 
 
@@ -463,7 +562,7 @@ def _to_openssl_date(date_str: str) -> str:
     try:
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
     except ValueError:
-        dt = datetime.strptime(date_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+        dt = datetime.strptime(date_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
     return dt.strftime("%y%m%d%H%M%SZ")
 
 
@@ -490,5 +589,3 @@ def _build_crl_config(tmpdir: Path, root: Path) -> str:
         "commonName              = supplied\n"
         "emailAddress            = optional\n"
     )
-
-

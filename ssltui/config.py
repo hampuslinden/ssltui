@@ -60,10 +60,10 @@ def renewal_log_path(root: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 CA_SUBJECT = "/CN=ssltui Local CA/O=ssltui/C=UK"
-CA_VALIDITY_DAYS = 1095          # 3 years
-LEAF_VALIDITY_DAYS = 180         # default leaf cert lifetime
-LEAF_VALIDITY_MAX = 825          # hard cap (Apple/browser limit)
-RENEWAL_THRESHOLD_DAYS = 30      # renew if expiry within this window
+CA_VALIDITY_DAYS = 1095  # 3 years
+LEAF_VALIDITY_DAYS = 180  # default leaf cert lifetime
+LEAF_VALIDITY_MAX = 825  # hard cap (Apple/browser limit)
+RENEWAL_THRESHOLD_DAYS = 30  # renew if expiry within this window
 
 # Key parameters
 RSA_BITS = 4096
@@ -72,6 +72,7 @@ EC_CURVE = "secp384r1"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _safe_cn(cn: str) -> str:
     """Map a CN to a safe filesystem name."""

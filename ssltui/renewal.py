@@ -2,33 +2,38 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ssltui import config, store
-from ssltui.ca import renew_cert, CAError
+from ssltui.ca import CAError, renew_cert
 
 
 def _parse_expiry(expiry_str: str) -> datetime:
     """Parse the openssl 'notAfter' date string to a UTC datetime."""
     # Format: "Jun 13 12:00:00 2026 GMT"
-    return datetime.strptime(expiry_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+    return datetime.strptime(expiry_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
 
 
 def days_until_expiry(expiry_str: str) -> int:
     exp = _parse_expiry(expiry_str)
-    delta = exp - datetime.now(timezone.utc)
+    delta = exp - datetime.now(UTC)
     return delta.days
 
 
-def certs_expiring_within(root: Path, threshold_days: int = config.RENEWAL_THRESHOLD_DAYS) -> list[dict]:
+def certs_expiring_within(
+    root: Path, threshold_days: int = config.RENEWAL_THRESHOLD_DAYS
+) -> list[dict]:
     return [
-        c for c in store.list_certs(root)
+        c
+        for c in store.list_certs(root)
         if days_until_expiry(c["expiry"]) <= threshold_days
     ]
 
 
-def renew_all(root: Path, threshold_days: int = config.RENEWAL_THRESHOLD_DAYS) -> list[tuple[str, bool, str]]:
+def renew_all(
+    root: Path, threshold_days: int = config.RENEWAL_THRESHOLD_DAYS
+) -> list[tuple[str, bool, str]]:
     """Renew all certs expiring within threshold.
 
     Returns list of (cn, success, message).
@@ -63,8 +68,10 @@ def refresh_crl(root: Path, threshold_days: int = 7) -> bool:
     try:
         out = run_openssl(["crl", "-noout", "-nextupdate"], input=last_pem)
         next_update_str = out.decode().strip().split("=", 1)[-1]
-        next_update = datetime.strptime(next_update_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
-        if (next_update - datetime.now(timezone.utc)).days <= threshold_days:
+        next_update = datetime.strptime(
+            next_update_str, "%b %d %H:%M:%S %Y %Z"
+        ).replace(tzinfo=UTC)
+        if (next_update - datetime.now(UTC)).days <= threshold_days:
             generate_crl(root)
             return True
     except (CAError, ValueError):
@@ -85,4 +92,4 @@ def _last_crl_pem(crl_path: Path) -> bytes | None:
     last_end = text.find(end, last_start)
     if last_end == -1:
         return None
-    return text[last_start: last_end + len(end)].encode()
+    return text[last_start : last_end + len(end)].encode()

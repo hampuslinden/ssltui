@@ -19,10 +19,14 @@ A simple Flask API and dashboard mode is also available for issuing and download
 | Scheduling / renewal | `cron` entry + headless CLI mode |
 | Config persistence | `json` (stdlib) |
 | Subprocess management | `subprocess` (stdlib) |
+| Linting | `ruff` |
+
 
 - Python's `ssl` module exposes verification and context objects but delegates key/cert generation to OpenSSL. The application shells out to `openssl` for all key and certificate operations — this is the standard pattern when avoiding a third-party cryptography library.
 
 - Use strict type annotations.
+
+- Ensure `ruff` passes with no errors or warnings.
 
 - The token generated means everything, it can be used to download certs and keys, so it should be stored securely. 
 

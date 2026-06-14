@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.text import Text
-
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
@@ -29,7 +28,16 @@ from textual.widgets import (
 )
 
 from ssltui import config, store
-from ssltui.ca import CAError, ca_expiry, ca_fingerprint, ca_subject, init_ca, issue_cert, renew_cert, revoke_cert
+from ssltui.ca import (
+    CAError,
+    ca_expiry,
+    ca_fingerprint,
+    ca_subject,
+    init_ca,
+    issue_cert,
+    renew_cert,
+    revoke_cert,
+)
 from ssltui.renewal import days_until_expiry
 
 if TYPE_CHECKING:
@@ -51,6 +59,7 @@ class _WerkzeugCapture(logging.Handler):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _root() -> Path:
     return config.data_dir()
 
@@ -68,6 +77,7 @@ def _expiry_style(days: int) -> str:
 # ---------------------------------------------------------------------------
 # Confirm modal (used for destructive actions)
 # ---------------------------------------------------------------------------
+
 
 class ConfirmScreen(ModalScreen):
     """Ask for confirmation before a destructive action. Dismisses True/False."""
@@ -98,7 +108,11 @@ class ConfirmScreen(ModalScreen):
         with Vertical():
             yield Label(self._title, classes="title")
             yield Label(self._message, classes="message")
-            yield Label("[dim]y[/dim] confirm  [dim]n / Esc[/dim] cancel", markup=True, classes="hint")
+            yield Label(
+                "[dim]y[/dim] confirm  [dim]n / Esc[/dim] cancel",
+                markup=True,
+                classes="hint",
+            )
             with Horizontal():
                 yield Button("Yes [y]", variant="error", id="yes")
                 yield Button("No [n]", variant="primary", id="no")
@@ -116,6 +130,7 @@ class ConfirmScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 # Init CA modal
 # ---------------------------------------------------------------------------
+
 
 class InitCAScreen(ModalScreen):
     """Modal to initialise the CA."""
@@ -181,10 +196,16 @@ class InitCAScreen(ModalScreen):
         subject = self.query_one("#subject", Input).value.strip()
         server_fqdn = self.query_one("#server_fqdn", Input).value.strip()
         rs = self.query_one("#key_type", RadioSet)
-        key_type = "rsa" if rs.pressed_button and rs.pressed_button.id == "rsa" else "ec"
+        key_type = (
+            "rsa" if rs.pressed_button and rs.pressed_button.id == "rsa" else "ec"
+        )
         try:
-            init_ca(_root(), key_type=key_type, subject=subject or None,
-                    server_fqdn=server_fqdn or None)
+            init_ca(
+                _root(),
+                key_type=key_type,
+                subject=subject or None,
+                server_fqdn=server_fqdn or None,
+            )
             self.dismiss(True)
         except CAError as exc:
             self.query_one("#error", Static).update(str(exc))
@@ -193,6 +214,7 @@ class InitCAScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 # Issue cert modal
 # ---------------------------------------------------------------------------
+
 
 class IssueCertScreen(ModalScreen):
     """Modal form for issuing a new certificate."""
@@ -220,7 +242,10 @@ class IssueCertScreen(ModalScreen):
                 "Comma or space-separated DNS names and IPs. The CN is included automatically.",
                 classes="hint",
             )
-            yield Input(placeholder="e.g. www.myapp.local, api.myapp.local, 192.168.1.10", id="sans")
+            yield Input(
+                placeholder="e.g. www.myapp.local, api.myapp.local, 192.168.1.10",
+                id="sans",
+            )
             yield Label("Validity (days, max 825)")
             yield Input(value=str(config.LEAF_VALIDITY_DAYS), id="validity")
             yield Label("Key type")
@@ -259,7 +284,9 @@ class IssueCertScreen(ModalScreen):
         sans_raw = self.query_one("#sans", Input).value.strip()
         validity_raw = self.query_one("#validity", Input).value.strip()
         rs = self.query_one("#key_type", RadioSet)
-        key_type = "rsa" if rs.pressed_button and rs.pressed_button.id == "rsa" else "ec"
+        key_type = (
+            "rsa" if rs.pressed_button and rs.pressed_button.id == "rsa" else "ec"
+        )
 
         error = self.query_one("#error", Static)
 
@@ -283,7 +310,9 @@ class IssueCertScreen(ModalScreen):
         sans_list = [s.strip() for s in re.split(r"[,\s]+", sans_raw) if s.strip()]
 
         if validity >= 200:
-            self._pending_issue = dict(cn=cn, sans=sans_list, key_type=key_type, validity=validity)
+            self._pending_issue = dict(
+                cn=cn, sans=sans_list, key_type=key_type, validity=validity
+            )
             self.app.push_screen(
                 ConfirmScreen(
                     title=f"Validity: {validity} days",
@@ -301,9 +330,17 @@ class IssueCertScreen(ModalScreen):
         p = self._pending_issue
         self._issue_cert(p["cn"], p["sans"], p["key_type"], p["validity"])
 
-    def _issue_cert(self, cn: str, sans_list: list, key_type: str, validity: int) -> None:
+    def _issue_cert(
+        self, cn: str, sans_list: list, key_type: str, validity: int
+    ) -> None:
         try:
-            meta = issue_cert(_root(), cn=cn, sans=sans_list, key_type=key_type, validity_days=validity)
+            meta = issue_cert(
+                _root(),
+                cn=cn,
+                sans=sans_list,
+                key_type=key_type,
+                validity_days=validity,
+            )
             self.dismiss(meta)
         except CAError as exc:
             self.query_one("#error", Static).update(str(exc))
@@ -312,6 +349,7 @@ class IssueCertScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 # Cert detail modal
 # ---------------------------------------------------------------------------
+
 
 class CertDetailScreen(ModalScreen):
     """Show cert details with force-renew / revoke actions."""
@@ -345,12 +383,20 @@ class CertDetailScreen(ModalScreen):
         with Vertical():
             yield Label(f"Certificate: {e['cn']}", classes="title")
             yield Label(f"[b]CN:[/b]     {e['cn']}", markup=True, classes="kv")
-            yield Label(f"[b]SANs:[/b]   {', '.join(e['sans'])}", markup=True, classes="kv")
-            yield Label(f"[b]Key:[/b]    {e.get('key_type', 'ec').upper()}", markup=True, classes="kv")
+            yield Label(
+                f"[b]SANs:[/b]   {', '.join(e['sans'])}", markup=True, classes="kv"
+            )
+            yield Label(
+                f"[b]Key:[/b]    {e.get('key_type', 'ec').upper()}",
+                markup=True,
+                classes="kv",
+            )
             yield Label(f"[b]Serial:[/b] {e['serial']}", markup=True, classes="kv")
             yield Label(f"[b]Issued:[/b] {e['issued'][:10]}", markup=True, classes="kv")
             yield Label(f"[b]Expires:[/b]{e['expiry']}", markup=True, classes="kv")
-            yield Label(f"[b]Days:[/b]   [{style}]{days}[/{style}]", markup=True, classes="kv")
+            yield Label(
+                f"[b]Days:[/b]   [{style}]{days}[/{style}]", markup=True, classes="kv"
+            )
             yield Label(f"[b]Cert:[/b]   {e['cert']}", markup=True, classes="kv")
             yield Label(f"[b]Key:[/b]    {e['key']}", markup=True, classes="kv")
             yield Label(f"[b]Chain:[/b]  {e['chain']}", markup=True, classes="kv")
@@ -397,6 +443,7 @@ class CertDetailScreen(ModalScreen):
 # API token modal
 # ---------------------------------------------------------------------------
 
+
 class TokenScreen(ModalScreen):
     """Display the API Bearer token with copy support."""
 
@@ -429,7 +476,9 @@ class TokenScreen(ModalScreen):
                 classes="hint",
             )
             yield Label(self._token, classes="token")
-            yield Label("[dim]y[/dim] copy  [dim]Esc[/dim] close", markup=True, classes="hint")
+            yield Label(
+                "[dim]y[/dim] copy  [dim]Esc[/dim] close", markup=True, classes="hint"
+            )
             with Horizontal():
                 yield Button("Copy [y]", variant="primary", id="copy")
                 yield Button("Close [Esc]", id="close")
@@ -451,6 +500,7 @@ class TokenScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 # curl issue-example modal
 # ---------------------------------------------------------------------------
+
 
 class IssueExampleScreen(ModalScreen):
     """Show a ready-to-run curl command for issuing a cert via the API.
@@ -487,10 +537,10 @@ class IssueExampleScreen(ModalScreen):
     def _curl(self, token: str) -> str:
         return (
             f"curl -X POST {self._base_url}/api/v1/certs \\\n"
-            f"  -H \"Authorization: Bearer {token}\" \\\n"
-            f"  -H \"Content-Type: application/json\" \\\n"
-            "  -d '{\"cn\": \"app.local\", \"sans\": [\"www.app.local\"], "
-            "\"key_type\": \"ec\", \"validity_days\": 180}'"
+            f'  -H "Authorization: Bearer {token}" \\\n'
+            f'  -H "Content-Type: application/json" \\\n'
+            '  -d \'{"cn": "app.local", "sans": ["www.app.local"], '
+            '"key_type": "ec", "validity_days": 180}\''
         )
 
     def compose(self) -> ComposeResult:
@@ -504,7 +554,8 @@ class IssueExampleScreen(ModalScreen):
             yield Static(self._curl(self.MASK), id="cmd", markup=False)
             yield Label(
                 "[dim]y[/dim] copy (real token)  [dim]r[/dim] reveal token  [dim]Esc[/dim] close",
-                markup=True, classes="hint",
+                markup=True,
+                classes="hint",
             )
             with Horizontal():
                 yield Button("Copy [y]", variant="primary", id="copy")
@@ -523,7 +574,9 @@ class IssueExampleScreen(ModalScreen):
         self._revealed = not self._revealed
         token = self._token if self._revealed else self.MASK
         self.query_one("#cmd", Static).update(self._curl(token))
-        self.query_one("#reveal", Button).label = "Hide [r]" if self._revealed else "Reveal [r]"
+        self.query_one("#reveal", Button).label = (
+            "Hide [r]" if self._revealed else "Reveal [r]"
+        )
 
     def action_copy(self) -> None:
         self.app.copy_to_clipboard(self._curl(self._token))
@@ -536,6 +589,7 @@ class IssueExampleScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 # Save-to-path modal
 # ---------------------------------------------------------------------------
+
 
 class SaveCertScreen(ModalScreen):
     """Prompt for a filesystem path then write the PEM there."""
@@ -561,7 +615,9 @@ class SaveCertScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("Save Certificate", classes="title")
-            yield Label("Edit the path below, then press Enter or Save.", classes="hint")
+            yield Label(
+                "Edit the path below, then press Enter or Save.", classes="hint"
+            )
             yield Input(value=self._default_path, id="path")
             yield Static("", id="error")
             with Horizontal():
@@ -602,6 +658,7 @@ class SaveCertScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 # Full-screen PEM viewer
 # ---------------------------------------------------------------------------
+
 
 class CertViewScreen(Screen):
     """Full-screen PEM certificate viewer.
@@ -716,6 +773,7 @@ class CertViewScreen(Screen):
 # Main screen
 # ---------------------------------------------------------------------------
 
+
 class MainScreen(Screen):
     BINDINGS = [
         Binding("i", "init_ca", "Init CA"),
@@ -760,7 +818,13 @@ class MainScreen(Screen):
         ca_ready = config.ca_cert_path(_root()).exists()
         if action == "init_ca":
             return False if ca_ready else True
-        if action in ("issue_cert", "revoke_selected", "view_ca_cert", "view_cert", "view_token"):
+        if action in (
+            "issue_cert",
+            "revoke_selected",
+            "view_ca_cert",
+            "view_cert",
+            "view_token",
+        ):
             return True if ca_ready else False
         return True
 
@@ -890,12 +954,14 @@ class MainScreen(Screen):
             info = f"Subject: {subj}  |  Expires: {expiry}  |  SHA256: {fp}"
         except CAError:
             info = str(ca_path)
-        self.app.push_screen(CertViewScreen(
-            title="Root CA Certificate",
-            pem=pem,
-            filename="local-ca.crt",
-            info=info,
-        ))
+        self.app.push_screen(
+            CertViewScreen(
+                title="Root CA Certificate",
+                pem=pem,
+                filename="local-ca.crt",
+                info=info,
+            )
+        )
 
     def action_view_cert(self) -> None:
         cn = self._selected_cn()
@@ -914,18 +980,23 @@ class MainScreen(Screen):
         sans = ", ".join(entry["sans"])
         info = f"CN: {cn}  |  SANs: {sans}  |  Expires: {entry['expiry']} ({days} days)"
         safe_name = cn.replace("*", "wildcard").replace("/", "_")
-        self.app.push_screen(CertViewScreen(
-            title=f"Certificate: {cn}",
-            pem=pem,
-            filename=f"{safe_name}.crt",
-            info=info,
-            key_path=Path(entry["key"]),
-        ))
+        self.app.push_screen(
+            CertViewScreen(
+                title=f"Certificate: {cn}",
+                pem=pem,
+                filename=f"{safe_name}.crt",
+                info=info,
+                key_path=Path(entry["key"]),
+            )
+        )
 
     def action_view_token(self) -> None:
         token_path = config.api_token_path(_root())
         if not token_path.exists():
-            self.notify("No API token found. Re-initialise the CA to generate one.", severity="warning")
+            self.notify(
+                "No API token found. Re-initialise the CA to generate one.",
+                severity="warning",
+            )
             return
         self.app.push_screen(
             TokenScreen(token_path.read_text().strip()),
@@ -957,7 +1028,9 @@ class MainScreen(Screen):
 
     def _on_issue_done(self, meta: dict | None) -> None:
         if meta:
-            self.notify(f"Issued: {meta['cn']} (expires in {meta['validity_days']} days)")
+            self.notify(
+                f"Issued: {meta['cn']} (expires in {meta['validity_days']} days)"
+            )
             self._build_table()
         self.query_one("#cert-table", DataTable).focus()
 
@@ -970,6 +1043,7 @@ class MainScreen(Screen):
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
+
 
 class SSLTuiApp(App):
     TITLE = "ssltui — Local CA Manager"
@@ -988,6 +1062,7 @@ def run_tui() -> None:
 # ---------------------------------------------------------------------------
 # API server TUI — ServeScreen / ServeApp (separate from the CA manager TUI)
 # ---------------------------------------------------------------------------
+
 
 class ServeScreen(Screen):
     """Full-screen view of a running API server: status bar + live request log."""
@@ -1126,8 +1201,9 @@ class ServeScreen(Screen):
                     log.write(Text(f"{ts}  cert renewed: {cn}", style="cyan"))
             self._cached_cns = current
 
-        if (now.get("ca.crl") != self._fs_state.get("ca.crl")
-                and now.get("index.json") == self._fs_state.get("index.json")):
+        if now.get("ca.crl") != self._fs_state.get("ca.crl") and now.get(
+            "index.json"
+        ) == self._fs_state.get("index.json"):
             log.write(Text(f"{ts}  CRL regenerated", style="dim"))
 
         if now.get("ca.crt") != self._fs_state.get("ca.crt"):
