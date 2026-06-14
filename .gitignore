@@ -1,0 +1,30 @@
+# Python files to ignore
+__pycache__
+.venv
+.env
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Ignore data files
+data/
+
+# SSL files to avoid 
+*.crt
+*.key
+*.pem
+
+# Temp launch tests
+.temp*
+
+# Build artifacts
+*.tar.gz
+*.tgz
+*.zip
+*.whl
+
+
+# Build / distribution artifacts
+dist/
+build/
+*.egg-info/
