@@ -1217,7 +1217,7 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
         # for any lookup or path derivation — an explicit sanitizer for every
         # endpoint that takes a <cn> route parameter.
         try:
-            config.validate_cn(cn)
+            cn = config.validate_cn(cn)
         except ValueError as exc:
             abort(400, description=str(exc))
         entry = store.get_cert(root, cn)
