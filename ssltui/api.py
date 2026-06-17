@@ -1213,6 +1213,13 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
     # --- Internal helpers ---
 
     def _entry_or_404(cn: str) -> dict:
+        # Validate against the strict hostname allow-list before the CN is used
+        # for any lookup or path derivation — an explicit sanitizer for every
+        # endpoint that takes a <cn> route parameter.
+        try:
+            cn = config.validate_cn(cn)
+        except ValueError as exc:
+            abort(400, description=str(exc))
         entry = store.get_cert(root, cn)
         if entry is None:
             abort(404, description=f"No cert found for CN={cn!r}")
@@ -1243,6 +1250,10 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
         cn = (body.get("cn") or "").strip()
         if not cn:
             abort(400, description="cn is required")
+        try:
+            cn = config.validate_cn(cn)
+        except ValueError as exc:
+            abort(400, description=str(exc))
         if store.get_cert(root, cn) is not None:
             abort(
                 409,
@@ -1277,21 +1288,26 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
             abort(400, description=str(exc))
         return jsonify(meta)  # type: ignore[return-value]
 
+    # Downloads re-derive the path from the containment-checked cert_dir rather
+    # than trusting the stored path string, so a tampered ca.db cannot redirect
+    # a read outside certs/<cn>/.
     @app.get("/api/v1/certs/<cn>/cert.pem")
     def download_cert(cn: str):
-        entry = _entry_or_404(cn)
-        return _pem_response(Path(entry["cert"]), f"{_safe(cn)}.crt")
+        _entry_or_404(cn)
+        return _pem_response(config.cert_dir(root, cn) / "cert.crt", f"{_safe(cn)}.crt")
 
     @app.get("/api/v1/certs/<cn>/key.pem")
     def download_key(cn: str):
-        entry = _entry_or_404(cn)
+        _entry_or_404(cn)
         store.add_event(root, "key_download", cn=cn, method="api")
-        return _pem_response(Path(entry["key"]), f"{_safe(cn)}.key")
+        return _pem_response(config.cert_dir(root, cn) / "cert.key", f"{_safe(cn)}.key")
 
     @app.get("/api/v1/certs/<cn>/chain.pem")
     def download_chain(cn: str):
-        entry = _entry_or_404(cn)
-        return _pem_response(Path(entry["chain"]), f"{_safe(cn)}-chain.pem")
+        _entry_or_404(cn)
+        return _pem_response(
+            config.cert_dir(root, cn) / "chain.crt", f"{_safe(cn)}-chain.pem"
+        )
 
     # --- Dashboard auth helpers ---
 
@@ -1386,18 +1402,16 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
     @app.get("/dashboard/certs/<cn>/cert.pem")
     @_require_session_api
     def dashboard_cert_download(cn: str):
-        entry = store.get_cert(root, cn)
-        if not entry:
-            abort(404)
-        return _pem_response(Path(entry["cert"]), f"{_safe(cn)}.crt")
+        _entry_or_404(cn)
+        return _pem_response(config.cert_dir(root, cn) / "cert.crt", f"{_safe(cn)}.crt")
 
     @app.get("/dashboard/certs/<cn>/chain.pem")
     @_require_session_api
     def dashboard_chain_download(cn: str):
-        entry = store.get_cert(root, cn)
-        if not entry:
-            abort(404)
-        return _pem_response(Path(entry["chain"]), f"{_safe(cn)}-chain.pem")
+        _entry_or_404(cn)
+        return _pem_response(
+            config.cert_dir(root, cn) / "chain.crt", f"{_safe(cn)}-chain.pem"
+        )
 
     # The root CA cert and CRL are public material (the CA cert is sent in every
     # TLS handshake; the CRL is meant to be published). They are served without a

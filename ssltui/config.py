@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -40,7 +41,17 @@ def db_path(root: Path) -> Path:
 
 
 def cert_dir(root: Path, cn: str) -> Path:
-    return root / "certs" / _safe_cn(cn)
+    # Validate against the strict hostname allow-list first: this is the
+    # primary sanitizer for any CN that reaches a filesystem path, so every
+    # caller (issue/renew/revoke) is covered regardless of prior validation.
+    cn = validate_cn(cn)
+    base = (root / "certs").resolve()
+    candidate = (base / _safe_cn(cn)).resolve()
+    # Defense in depth: must be exactly one level under certs/ — blocks "..",
+    # absolute paths, and any other traversal that survives _safe_cn.
+    if candidate.parent != base:
+        raise ValueError(f"Invalid certificate common name: {cn!r}")
+    return candidate
 
 
 def crl_path(root: Path) -> Path:
@@ -72,6 +83,23 @@ EC_CURVE = "secp384r1"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+# CN is a DNS hostname or wildcard label — strict allow-list. No path
+# separators, no traversal, no control characters.
+_CN_RE = re.compile(r"^(\*\.)?([A-Za-z0-9_-]+\.)*[A-Za-z0-9_-]+$")
+
+
+def validate_cn(cn: str) -> str:
+    """Validate a certificate CN against a strict hostname allow-list.
+
+    Returns the stripped CN. Raises ValueError on anything that isn't a plain
+    DNS hostname or wildcard (rejecting path separators, ``..``, control chars).
+    """
+    cn = cn.strip()
+    if not cn or len(cn) > 253 or not _CN_RE.match(cn):
+        raise ValueError(f"Invalid certificate common name: {cn!r}")
+    return cn
 
 
 def _safe_cn(cn: str) -> str:

@@ -76,7 +76,9 @@ at different directories or by using **p Root dir** in the TUI to switch at runt
 ~/.local/share/ssltui/
 ├── ca.key          # CA private key (0600)
 ├── ca.crt          # CA certificate (self-signed)
-├── index.json      # issued cert metadata
+├── ca.db           # SQLite store: cert index, revocations, event log, counters
+├── ca.crl          # certificate revocation list (PEM)
+├── api_token       # generated API/dashboard bearer token (0600)
 ├── certs/
 │   └── <cn>/
 │       ├── cert.crt    # signed leaf certificate
@@ -84,6 +86,12 @@ at different directories or by using **p Root dir** in the TUI to switch at runt
 │       └── chain.crt   # leaf + CA bundled
 └── renewal.log
 ```
+
+Cert and key material stays as flat PEM files under `certs/<cn>/`; all
+metadata — the cert index, revocation list, an append-only event log, and the
+serial / CRL-number counters — lives in the single SQLite database `ca.db`.
+It runs in WAL mode so the TUI, the cron `renew` job, and the Flask API can
+read and write concurrently without explicit file locking.
 
 ## Using the TUI
 
@@ -238,6 +246,14 @@ Authorization: Bearer <token>
 If you expose the server beyond localhost, treat that token like a secret. The
 API can return private keys, so it should only be reachable from trusted test
 infrastructure.
+
+### Input validation
+
+The `<cn>` path parameter is validated against a strict hostname allow-list
+(DNS hostnames and wildcards only). Anything else — path separators, `..`, or
+control characters — is rejected with `400 Bad Request` before any lookup.
+Certificate, key, and chain downloads are confined to the CA's `certs/<cn>/`
+directory, so a request can never read files outside it.
 
 ### Endpoints
 
