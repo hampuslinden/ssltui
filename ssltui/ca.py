@@ -177,6 +177,11 @@ def issue_cert(
     if not config.ca_key_path(root).exists():
         raise CAError("CA not initialised. Run init_ca() first.")
 
+    try:
+        cn = config.validate_cn(cn)
+    except ValueError as exc:
+        raise CAError(str(exc)) from exc
+
     validity_days = min(validity_days, config.LEAF_VALIDITY_MAX)
 
     san_list = _build_san_list(cn, sans)
