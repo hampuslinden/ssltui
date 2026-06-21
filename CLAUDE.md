@@ -134,7 +134,7 @@ Cron entry (installed by the app):
 0 3 * * * /usr/bin/python3 -m ssltui renew >> ~/.local/share/ssltui/renewal.log 2>&1
 ```
 
-Renewal threshold: renew if cert expires within 30 days (configurable). The `--renew` path must be fully non-interactive and safe to run as a cron job with no TTY.
+Renewal threshold: renew if cert expires within 30 days (configurable). The `renew` command must be fully non-interactive and safe to run as a cron job with no TTY.
 
 
 ## Infrastructure Requirements

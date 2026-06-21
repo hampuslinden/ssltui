@@ -1292,8 +1292,18 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
             _log_invalid("invalid token")
             abort(401)
 
+    _invalid_log_lock = threading.Lock()
+    _last_invalid_log = 0.0
+    _invalid_log_interval = 1.0  # seconds; prevents audit-log spam from probes
+
     def _log_invalid(reason: str) -> None:
         """Record a rejected API request in the audit log (best-effort)."""
+        nonlocal _last_invalid_log
+        now = time.monotonic()
+        with _invalid_log_lock:
+            if now - _last_invalid_log < _invalid_log_interval:
+                return
+            _last_invalid_log = now
         try:
             store.add_event(
                 root,
