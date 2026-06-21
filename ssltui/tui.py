@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import queue as _queue
 from datetime import datetime
@@ -62,6 +64,25 @@ class _WerkzeugCapture(logging.Handler):
 
 def _root() -> Path:
     return config.data_dir()
+
+
+def _audit_csv(root: Path) -> str:
+    """Render the full stored event log as CSV text (matches the API export)."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["id", "timestamp", "type", "cn", "method", "detail"])
+    for ev in store.list_events(root, limit=None):
+        writer.writerow(
+            [
+                ev.get("id", ""),
+                ev.get("ts") or "",
+                ev.get("type") or "",
+                ev.get("cn") or "",
+                ev.get("method") or "",
+                ev.get("detail") or "",
+            ]
+        )
+    return buf.getvalue()
 
 
 def _expiry_style(days: int) -> str:
@@ -677,14 +698,17 @@ class SaveCertScreen(ModalScreen):
     SaveCertScreen #error { color: red; height: auto; }
     """
 
-    def __init__(self, pem: str, default_path: str) -> None:
+    def __init__(
+        self, pem: str, default_path: str, title: str = "Save Certificate"
+    ) -> None:
         super().__init__()
         self._pem = pem
         self._default_path = default_path
+        self._title = title
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label("Save Certificate", classes="title")
+            yield Label(self._title, classes="title")
             yield Label(
                 "Edit the path below, then press Enter or Save.", classes="hint"
             )
@@ -866,6 +890,7 @@ class MainScreen(Screen):
         Binding("d", "view_cert", "View cert"),
         Binding("x", "revoke_selected", "Revoke"),
         Binding("t", "view_token", "API Token"),
+        Binding("a", "export_audit", "Export audit"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -890,6 +915,7 @@ class MainScreen(Screen):
             yield Button("Init CA [i]", id="btn-init", variant="primary")
             yield Button("New Cert [n]", id="btn-new")
             yield Button("Trusted CA [c]", id="btn-ca-cert")
+            yield Button("Export Audit [a]", id="btn-audit")
         yield DataTable(id="cert-table", cursor_type="row", zebra_stripes=True)
         yield Footer()
 
@@ -986,6 +1012,8 @@ class MainScreen(Screen):
             self.action_issue_cert()
         elif event.button.id == "btn-ca-cert":
             self.action_view_ca_cert()
+        elif event.button.id == "btn-audit":
+            self.action_export_audit()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         cn = event.row_key.value
@@ -1091,6 +1119,26 @@ class MainScreen(Screen):
             TokenScreen(token_path.read_text().strip()),
             lambda _: self.query_one("#cert-table", DataTable).focus(),
         )
+
+    def action_export_audit(self) -> None:
+        root = _root()
+        events = store.list_events(root, limit=None)
+        if not events:
+            self.notify("No audit events recorded yet.", severity="warning")
+            return
+        self.app.push_screen(
+            SaveCertScreen(
+                pem=_audit_csv(root),
+                default_path=str(Path.home() / "ssltui-audit.csv"),
+                title="Export Audit Log",
+            ),
+            self._on_audit_saved,
+        )
+
+    def _on_audit_saved(self, path: str | None) -> None:
+        if path:
+            self.notify(f"Audit log exported → {path}")
+        self.query_one("#cert-table", DataTable).focus()
 
     def action_refresh(self) -> None:
         self._build_table()
