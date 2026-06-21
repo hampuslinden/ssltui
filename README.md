@@ -219,6 +219,21 @@ The helper script installs the Flask extra and starts the same command:
 ./ssltui_web.sh --host 0.0.0.0 --port 8080
 ```
 
+#### Running in the background on a server
+
+`ssltui serve` (like the TUI) runs in the foreground and stops when you log out.
+To keep it running on a remote server after you disconnect, start it inside a
+[tmux](https://github.com/tmux/tmux/wiki) session:
+
+```bash
+tmux new -s ssltui          # start a session
+uv run ssltui serve --host 0.0.0.0 --port 8080
+# detach with Ctrl-b then d — the server keeps running
+```
+
+Reattach later with `tmux attach -t ssltui`. (`screen` or a systemd user
+service work equally well.)
+
 While the server runs, the TUI shows a live access log alongside historical
 issue events:
 
@@ -264,6 +279,7 @@ directory, so a request can never read files outside it.
 - `GET /api/v1/certs/<cn>/cert.pem` downloads the leaf certificate
 - `GET /api/v1/certs/<cn>/key.pem` downloads the private key
 - `GET /api/v1/certs/<cn>/chain.pem` downloads the chain bundle
+- `GET /api/v1/crl.pem` downloads the certificate revocation list
 
 Example issue request:
 
@@ -332,7 +348,8 @@ Sign in with your API token. The dashboard:
   refreshes automatically every 30 seconds
 - streams a live event log (issued / renewed / revoked, CRL regeneration)
 - lets you view and download the **certificate** and **chain** PEMs
-- provides **root CA certificate** and **CRL** download links in the status bar
+- provides **root CA certificate**, **CRL**, and **audit log** (CSV) download
+  links in the status bar (the audit log requires a signed-in session)
 
 For safety, the dashboard never modifies the CA and never serves private keys —
 key downloads are available only through the API and the TUI.

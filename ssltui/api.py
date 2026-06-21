@@ -12,12 +12,14 @@ Endpoints:
   GET   /api/v1/certs/<cn>/cert.pem   download leaf cert
   GET   /api/v1/certs/<cn>/key.pem    download private key
   GET   /api/v1/certs/<cn>/chain.pem  download chain (leaf + CA)
+  GET   /api/v1/crl.pem               download certificate revocation list
 
 Wildcard CN example: GET /api/v1/certs/%2A.local/cert.pem
 """
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import hmac
 import io
@@ -120,6 +122,7 @@ _EVENT_RENDER: dict[str, tuple[str, str]] = {
     "revoke": ("warning", "revoked"),
     "key_download": ("warning", "key downloaded"),
     "ca_init": ("error", "CA re-initialised"),
+    "invalid_request": ("error", "invalid API request"),
 }
 
 
@@ -220,6 +223,7 @@ _LOGIN_HTML = """\
 <html lang="en">
 <head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.ico" type="image/x-icon">
 <title>ssltui &#8212; Login</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -259,6 +263,7 @@ _DASHBOARD_HTML = """\
 <html lang="en">
 <head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.ico" type="image/x-icon">
 <title>ssltui &#8212; Dashboard</title>
 <style>
 :root{
@@ -384,6 +389,15 @@ td{padding:4px 8px;vertical-align:middle}
   padding:22px 26px;width:400px;max-width:94vw}
 #auth-modal h3{font-size:14px;font-weight:bold;color:var(--red)}
 #auth-modal-btns{display:flex;gap:8px;align-items:center}
+/* connection-lost modal */
+#conn-modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);
+  z-index:200;align-items:center;justify-content:center}
+#conn-modal-bg.open{display:flex}
+#conn-modal{background:var(--surf);border:1px solid var(--ylw);
+  padding:22px 26px;width:420px;max-width:94vw}
+#conn-modal h3{font-size:14px;font-weight:bold;color:var(--ylw)}
+#conn-modal-btns{display:flex;gap:8px;align-items:center}
+#conn-st{font-size:12px;color:var(--ylw)}
 /* API designer modal */
 #admodal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);
   z-index:100;align-items:center;justify-content:center}
@@ -433,10 +447,11 @@ td{padding:4px 8px;vertical-align:middle}
 </div>
 <div id="sbar">
   <span id="sdot">&#9679;</span>
-  API on <strong>{{ server_url | e }}</strong>
-  &nbsp;&middot;&nbsp; CA root: {{ ca_root | e }}
+  <span id="sbar-info">API on <strong>{{ server_url | e }}</strong>
+  &nbsp;&middot;&nbsp; CA root: {{ ca_root | e }}</span>
   &nbsp;&middot;&nbsp; <a href="#" data-dl="/dashboard/ca/ca.crt" data-name="ca.crt" class="btn ca-dl" style="padding:1px 6px;font-size:11px">&#8595; Root CA cert</a>
   &nbsp;&middot;&nbsp; <a href="#" data-dl="/dashboard/ca/crl.pem" data-name="ca.crl" class="btn ca-dl" style="padding:1px 6px;font-size:11px">&#8595; CRL</a>
+  &nbsp;&middot;&nbsp; <a href="#" data-dl="/dashboard/ca/audit.csv" data-name="ssltui-audit.csv" class="btn ca-dl" style="padding:1px 6px;font-size:11px">&#8595; Audit log</a>
 </div>
 <div id="main">
   <div id="cpanel">
@@ -520,6 +535,20 @@ td{padding:4px 8px;vertical-align:middle}
   </div>
 </div>
 
+<div id="conn-modal-bg">
+  <div id="conn-modal">
+    <h3>&#9888; Connection lost</h3>
+    <p style="font-size:12px;color:var(--mut);margin:12px 0 18px;line-height:1.6">
+      The dashboard can't reach the backend server. Sensitive information
+      &mdash; the CA path, certificate list and event log &mdash; has been
+      hidden and will be reloaded automatically once the connection returns.
+    </p>
+    <div id="conn-modal-btns">
+      <span id="conn-st">Reconnecting&#8230;</span>
+    </div>
+  </div>
+</div>
+
 <div id="admodal-bg">
   <div id="admodal">
     <button id="admodal-close" onclick="closeDesigner()">&times;</button>
@@ -577,7 +606,51 @@ function showAuthError() {
   if (_authFailed) return;
   _authFailed = true;
   if (evSrc) evSrc.close();
+  wipeSensitive();
   document.getElementById('auth-modal-bg').classList.add('open');
+}
+
+// --- Connection-loss handling ---------------------------------------------
+// If the dashboard can't reach the backend, wipe everything sensitive from the
+// page — the CA filesystem path, the CA subject, the certificate list and the
+// event log — and close any modal that could still expose the token or key/cert
+// material. A blocking overlay is shown until the connection returns, at which
+// point the static header values are restored and ALL data is re-read: the cert
+// list is reloaded and the SSE stream replays the full event buffer.
+let _connLost = false;
+const _saved = {};
+
+function wipeSensitive() {
+  const caNfo = document.getElementById('ca-nfo');
+  const sbar = document.getElementById('sbar-info');
+  // Stash the server-rendered static values once so we can restore them later.
+  if (!('caNfo' in _saved)) { _saved.caNfo = caNfo.innerHTML; _saved.sbar = sbar.innerHTML; }
+  caNfo.textContent = '';
+  sbar.textContent = '—';
+  document.getElementById('ccnt').textContent = '';
+  document.getElementById('elog').innerHTML = '';
+  document.getElementById('ctbody').innerHTML =
+    '<tr><td colspan="6" class="empty">—</td></tr>';
+  closeKeyModal(); closeIssueModal(); closePemModal(); closeDesigner();
+}
+
+function connectionLost() {
+  if (_connLost || _authFailed) return;
+  _connLost = true;
+  wipeSensitive();
+  document.getElementById('conn-modal-bg').classList.add('open');
+  document.getElementById('fst').textContent = 'Connection lost';
+}
+
+// Restore the static header/status values and drop the overlay. Callers are
+// responsible for re-reading the dynamic data (cert table + event stream).
+function connectionRestored() {
+  if (!_connLost) return;
+  _connLost = false;
+  document.getElementById('ca-nfo').innerHTML = _saved.caNfo || '';
+  document.getElementById('sbar-info').innerHTML = _saved.sbar || '';
+  document.getElementById('conn-modal-bg').classList.remove('open');
+  document.getElementById('fst').textContent = 'Reconnected ' + new Date().toLocaleTimeString();
 }
 
 async function loadCerts() {
@@ -591,6 +664,7 @@ async function loadCerts() {
       return;
     }
     const certs = await r.json();
+    connectionRestored();  // a successful read means the backend is reachable again
     if (!Array.isArray(certs)) {
       tb.innerHTML = '<tr><td colspan="6" class="empty" style="color:var(--red)">Unexpected server response: ' + ESC(JSON.stringify(certs).slice(0, 80)) + '</td></tr>';
       return;
@@ -624,8 +698,10 @@ async function loadCerts() {
     }).join('');
     document.getElementById('fst').textContent = 'Certs updated ' + new Date().toLocaleTimeString();
   } catch (e) {
-    tb.innerHTML = '<tr><td colspan="6" class="empty" style="color:var(--red)">Failed to load certificates: ' + ESC(e.message) + '</td></tr>';
+    // A network-level failure (fetch threw) means we've lost the backend —
+    // wipe sensitive data and show the connection-lost overlay.
     console.error('loadCerts', e);
+    connectionLost();
   }
 }
 
@@ -653,9 +729,15 @@ let evSrc = null;
 function connectSSE() {
   if (_authFailed) return;
   if (evSrc) evSrc.close();
+  // The stream replays the full event buffer on every connection, so clear the
+  // log first: this avoids duplicates and means a reconnect re-reads all events.
+  elog.innerHTML = '';
   evSrc = new EventSource('/dashboard/api/events/stream');
   const st = document.getElementById('sse-st');
-  evSrc.onopen = () => { st.textContent = 'live'; st.style.color = '#3fb950'; };
+  evSrc.onopen = () => {
+    st.textContent = 'live'; st.style.color = '#3fb950';
+    if (_connLost) { connectionRestored(); loadCerts(); }
+  };
   evSrc.onmessage = e => {
     const ev = JSON.parse(e.data);
     appendEv(ev);
@@ -665,12 +747,16 @@ function connectSSE() {
     evSrc.close();
     if (_authFailed) return;
     // A 401 (expired session) surfaces here as a generic error; probe the
-    // certs endpoint so we can tell "session expired" from "server restarting".
+    // certs endpoint so we can tell "session expired" from "lost connection".
     fetch('/dashboard/api/certs', {method: 'HEAD'}).then(r => {
       if (r.status === 401) { showAuthError(); return; }
+      // Backend is reachable \u2014 only the stream dropped. Recover if we'd wiped.
+      if (_connLost) { connectionRestored(); loadCerts(); }
       st.textContent = 'reconnecting\u2026'; st.style.color = '#d29922';
       setTimeout(connectSSE, 4000);
     }).catch(() => {
+      // The probe itself failed: the backend is unreachable. Wipe sensitive data.
+      connectionLost();
       st.textContent = 'reconnecting\u2026'; st.style.color = '#d29922';
       setTimeout(connectSSE, 4000);
     });
@@ -783,7 +869,8 @@ const AD_ENDPOINTS = [
   {id:'renew', label:'Renew a certificate',        method:'POST', path:'/api/v1/certs/{cn}/renew',     params:['cn'], body:null},
   {id:'cert',  label:'Download certificate (PEM)', method:'GET',  path:'/api/v1/certs/{cn}/cert.pem',  params:['cn'], body:null, download:'{safe}.crt'},
   {id:'key',   label:'Download private key (PEM)', method:'GET',  path:'/api/v1/certs/{cn}/key.pem',   params:['cn'], body:null, download:'{safe}.key'},
-  {id:'chain', label:'Download chain (PEM)',       method:'GET',  path:'/api/v1/certs/{cn}/chain.pem', params:['cn'], body:null, download:'{safe}-chain.pem'}
+  {id:'chain', label:'Download chain (PEM)',       method:'GET',  path:'/api/v1/certs/{cn}/chain.pem', params:['cn'], body:null, download:'{safe}-chain.pem'},
+  {id:'crl',   label:'Download CRL (PEM)',          method:'GET',  path:'/api/v1/crl.pem',              params:[],     body:null, download:'ca.crl'}
 ];
 let _adTokVis = false;
 let _adCNs = [];
@@ -1198,12 +1285,32 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
     def _auth():
         if request.path.startswith("/dashboard"):
             return  # dashboard uses session-based auth
+        if request.path == "/favicon.ico":
+            return  # static asset; no auth required
         auth = request.headers.get("Authorization", "")
         if not (auth.startswith("Bearer ") and hmac.compare_digest(auth[7:], token)):
+            _log_invalid("invalid token")
             abort(401)
+
+    def _log_invalid(reason: str) -> None:
+        """Record a rejected API request in the audit log (best-effort)."""
+        try:
+            store.add_event(
+                root,
+                "invalid_request",
+                method="api",
+                detail=f"{reason}: {request.method} {request.path}",
+            )
+        except Exception:
+            pass
 
     @app.errorhandler(HTTPException)
     def _http_error(e: HTTPException):
+        # Malformed API requests (400) are logged as invalid format. Auth
+        # failures (401) are already logged as "invalid token" in _auth; other
+        # codes (404/409) are valid requests and are not treated as invalid.
+        if e.code == 400 and request.path.startswith("/api/"):
+            _log_invalid("invalid api format")
         return jsonify(error=e.description), e.code
 
     @app.errorhandler(Exception)
@@ -1309,6 +1416,15 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
             config.cert_dir(root, cn) / "chain.crt", f"{_safe(cn)}-chain.pem"
         )
 
+    @app.get("/api/v1/crl.pem")
+    def download_crl():
+        crl = config.crl_path(root)
+        if not crl.exists():
+            abort(
+                404, description="CRL not found — no certificates have been revoked yet"
+            )
+        return _pem_response(crl, "ca.crl")
+
     # --- Dashboard auth helpers ---
 
     def _require_session(f):
@@ -1330,6 +1446,18 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
         return _w
 
     # --- Dashboard routes ---
+
+    @app.get("/favicon.ico")
+    def favicon():
+        icon = Path(__file__).resolve().parent / "images" / "favicon.ico"
+        if not icon.exists():
+            abort(404, description="favicon not found")
+        return send_file(
+            io.BytesIO(icon.read_bytes()),
+            mimetype="image/x-icon",
+            download_name="favicon.ico",
+            max_age=24 * 60 * 60,
+        )
 
     @app.get("/")
     def root_redirect():
@@ -1442,6 +1570,35 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
             mimetype="application/x-pem-file",
             as_attachment=True,
             download_name="ca.crl",
+        )
+
+    # The full audit log (every issue/renew/revoke and key-download event) is
+    # sensitive operational data, so — unlike the CA cert and CRL — it requires
+    # an authenticated session. The dashboard's caDownload helper surfaces the
+    # 401 from _require_session_api as a re-login prompt.
+    @app.get("/dashboard/ca/audit.csv")
+    @_require_session_api
+    def dashboard_audit_download():
+        events = store.list_events(root, limit=None)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["id", "timestamp", "type", "cn", "method", "detail"])
+        for ev in events:
+            writer.writerow(
+                [
+                    ev.get("id", ""),
+                    ev.get("ts") or "",
+                    ev.get("type") or "",
+                    ev.get("cn") or "",
+                    ev.get("method") or "",
+                    ev.get("detail") or "",
+                ]
+            )
+        return send_file(
+            io.BytesIO(buf.getvalue().encode("utf-8")),
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name="ssltui-audit.csv",
         )
 
     return app

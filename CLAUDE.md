@@ -131,7 +131,7 @@ the dashboard and TUI live activity logs.
 Cron entry (installed by the app):
 
 ```bash
-0 3 * * * /usr/bin/python3 -m ssltui --renew >> ~/.local/share/ssltui/renewal.log 2>&1
+0 3 * * * /usr/bin/python3 -m ssltui renew >> ~/.local/share/ssltui/renewal.log 2>&1
 ```
 
 Renewal threshold: renew if cert expires within 30 days (configurable). The `--renew` path must be fully non-interactive and safe to run as a cron job with no TTY.

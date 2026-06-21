@@ -217,6 +217,21 @@ curl -s -H "Authorization: Bearer $SSLTUI_API_TOKEN" \
   http://127.0.0.1:8080/api/v1/certs/api.test.local/chain.pem
 ```
 
+### Download the certificate revocation list (CRL)
+
+```
+GET /api/v1/crl.pem
+```
+
+Returns the CA's PEM-encoded certificate revocation list. Responds `404` if no
+certificate has been revoked yet (the CRL is generated on the first revocation).
+
+```bash
+curl -s -H "Authorization: Bearer $SSLTUI_API_TOKEN" \
+  -o ca.crl \
+  http://127.0.0.1:8080/api/v1/crl.pem
+```
+
 ## Error responses
 
 All errors return a JSON object with a single `error` field and an appropriate
