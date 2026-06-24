@@ -50,6 +50,12 @@ uv run ssltui    # launch the TUI
 On first launch the CA is uninitialised. Press **i** or click **Init CA** to
 create a root CA, then **n** to issue your first certificate.
 
+When initialising the CA you can optionally **restrict the CN / SAN suffix**
+(e.g. `.local`). Once set, every certificate the CA issues — via the TUI, CLI,
+API, or cron renewal — must use names under that suffix; the CN and all DNS SANs
+are validated at issue time (IP SANs are exempt). Leave the field blank to allow
+any name. See [TUI.md](docs/TUI.md) for details.
+
 ## Data directory
 
 Certificates and keys are stored in `~/.local/share/ssltui/` by default.

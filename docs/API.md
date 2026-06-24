@@ -146,6 +146,13 @@ Invalid input (missing `cn`, bad `key_type`, etc.) returns `400`:
 { "error": "cn is required" }
 ```
 
+If the CA was initialised with a name-suffix restriction, a CN or DNS SAN
+outside that suffix is also rejected with `400` (IP SANs are exempt):
+
+```json
+{ "error": "name(s) not permitted by CA policy (must be under .local): app.dev" }
+```
+
 ### Get certificate metadata
 
 ```
@@ -239,7 +246,7 @@ HTTP status code:
 
 | Status | Meaning |
 |--------|---------|
-| `400 Bad Request` | Invalid or missing request fields (e.g. no `cn`, bad `key_type`) |
+| `400 Bad Request` | Invalid or missing request fields (e.g. no `cn`, bad `key_type`), or a CN/SAN outside the CA's name-suffix policy |
 | `401 Unauthorized` | Missing or incorrect bearer token |
 | `404 Not Found` | No certificate exists for the given CN, or the file is missing |
 | `500 Internal Server Error` | Unexpected server error (`{ "error": "Internal server error" }`) |

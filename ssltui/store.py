@@ -225,6 +225,31 @@ def set_server_fqdn(root: Path, fqdn: str | None) -> None:
         _bump_version(conn)
 
 
+def get_name_suffix(root: Path) -> str | None:
+    """Return the CA's required CN/SAN name suffix, or None if unrestricted."""
+    if not _exists(root):
+        return None
+    with _connect(root) as conn:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = 'name_suffix'"
+        ).fetchone()
+    return row["value"] if row else None
+
+
+def set_name_suffix(root: Path, suffix: str | None) -> None:
+    """Set (or clear, with a falsy value) the required CN/SAN name suffix."""
+    with _connect(root) as conn:
+        if suffix:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('name_suffix', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (suffix,),
+            )
+        else:
+            conn.execute("DELETE FROM meta WHERE key = 'name_suffix'")
+        _bump_version(conn)
+
+
 def next_crl_number(root: Path) -> int:
     with _connect(root) as conn:
         n = _incr(conn, "crl_number")

@@ -17,7 +17,7 @@ A simple Flask API and dashboard mode is also available for issuing and download
 | TUI | `textual` |
 | Cryptography / cert generation | `ssl`, `subprocess` → `openssl` CLI |
 | Scheduling / renewal | `cron` entry + headless CLI mode |
-| Config persistence | `json` (stdlib) |
+| Config persistence | `sqlite` (stdlib) |
 | Subprocess management | `subprocess` (stdlib) |
 | Linting | `ruff` |
 
@@ -59,6 +59,8 @@ Use only post-2020 cipher suites. Minimum TLS 1.2, prefer TLS 1.3.
 - For public SSL recommend the user uses [Let's Encrypt](https://letsencrypt.org/) or a commercial CA. This tool is intended for local development and private networks only.
 
 - Allow the user to create the root key with a passphrase but warn them they have to enter this every single time they use the CA. The CA is not intended for production use, and the user should be aware of the security implications of using a local CA. Default should be blank.
+
+- At init, allow the user to optionally restrict the CN/SAN name suffix (e.g. `.local`). The input is presented but can be bypassed (blank = unrestricted). The policy is stored in the `meta` table (`name_suffix`, normalised by `config.normalize_name_suffix`) and enforced in `ca.issue_cert` — the single chokepoint all modes funnel through — against the CN and every DNS SAN (IP SANs exempt). It is fixed at init time.
 
 ## Application Modes
 
@@ -119,7 +121,8 @@ flat PEM files under `certs/<cn>/`.
 
 Tables: `certs` (CN → metadata JSON), `revoked` (serial → JSON), `events`
 (`id`, `ts`, `type`, `cn`, `method`, `detail`), and `meta` (serial, crl_number,
-server_fqdn, and a `version` counter the dashboard/TUI watchers poll to refresh).
+server_fqdn, an optional `name_suffix` CN/SAN policy, and a `version` counter
+the dashboard/TUI watchers poll to refresh).
 
 Events record lifecycle actions (`issue`, `renew`, `revoke`) and every private
 **key access** (`key_download`), each tagged with the originating `method`
@@ -165,5 +168,4 @@ Renewal threshold: renew if cert expires within 30 days (configurable). The `ren
 
 - The CLAUDE.md file should include the technical overview, architecture, and design decisions.
 
-- The API.md file should include the API endpoints, request/response formats, and authentication details. Including examples.
-
+- Further documentation in the `docs/` directory.

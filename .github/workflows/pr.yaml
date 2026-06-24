@@ -40,7 +40,7 @@ jobs:
           which tmux > /dev/null || sudo apt install -y tmux
           mkdir -p test-results
           echo "::startgroup::Running tests"
-          uv run pytest -v \
+          uv run --all-extras pytest -v \
             --junitxml=test-results/junit.xml \
             | tee test-results/pytest.log
           echo "::endgroup::Running tests"

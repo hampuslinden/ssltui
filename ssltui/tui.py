@@ -33,7 +33,6 @@ from ssltui import config, store
 from ssltui.ca import (
     CAError,
     ca_expiry,
-    ca_fingerprint,
     ca_subject,
     init_ca,
     issue_cert,
@@ -226,7 +225,7 @@ class InitCAScreen(ModalScreen):
         background: $surface; border: thick $primary; padding: 1 2;
     }
     InitCAScreen .title { text-align: center; text-style: bold; margin-bottom: 1; }
-    InitCAScreen .hint { color: $text-muted; margin-bottom: 1; }
+    InitCAScreen .hint { width: 100%; height: auto; color: $text-muted; margin-bottom: 1; }
     InitCAScreen #error { color: red; height: auto; }
     """
 
@@ -242,6 +241,13 @@ class InitCAScreen(ModalScreen):
                 classes="hint",
             )
             yield Input(placeholder="e.g. ca.myhost.local", id="server_fqdn")
+            yield Label("Restrict CN / SAN suffix (optional)")
+            yield Label(
+                "Lock every issued cert to names under this suffix (e.g. "
+                ".local). Leave blank to allow any name.",
+                classes="hint",
+            )
+            yield Input(placeholder="e.g. .local", id="name_suffix")
             yield Label("Key type")
             with RadioSet(id="key_type"):
                 yield RadioButton("EC P-384 (recommended)", value=True, id="ec")
@@ -274,6 +280,7 @@ class InitCAScreen(ModalScreen):
     def _do_create(self) -> None:
         subject = self.query_one("#subject", Input).value.strip()
         server_fqdn = self.query_one("#server_fqdn", Input).value.strip()
+        name_suffix = self.query_one("#name_suffix", Input).value.strip()
         rs = self.query_one("#key_type", RadioSet)
         key_type = (
             "rsa" if rs.pressed_button and rs.pressed_button.id == "rsa" else "ec"
@@ -284,6 +291,7 @@ class InitCAScreen(ModalScreen):
                 key_type=key_type,
                 subject=subject or None,
                 server_fqdn=server_fqdn or None,
+                name_suffix=name_suffix or None,
             )
             self.dismiss(True)
         except CAError as exc:
@@ -312,8 +320,15 @@ class IssueCertScreen(ModalScreen):
     """
 
     def compose(self) -> ComposeResult:
+        suffix = store.get_name_suffix(_root())
         with Vertical():
             yield Label("Issue New Certificate", classes="title")
+            if suffix:
+                yield Label(
+                    f"CA policy: names must be under [b].{suffix}[/b]",
+                    markup=True,
+                    classes="hint",
+                )
             yield Label("Common Name (CN)")
             yield Input(placeholder="e.g. myapp.local or *.myapp.local", id="cn")
             yield Label("Subject Alternative Names (SANs)")
@@ -958,10 +973,13 @@ class MainScreen(Screen):
             try:
                 subj = ca_subject(root)
                 expiry = ca_expiry(root)
-                fp = ca_fingerprint(root)
+                suffix = store.get_name_suffix(root)
+                suffix_part = (
+                    f"  names [b].{suffix}[/b]" if suffix else "  names [dim]any[/dim]"
+                )
                 status.update(
                     f"[green]CA ready[/green]  [b]{subj}[/b]  "
-                    f"expires [b]{expiry}[/b]  SHA256: {fp[:29]}…"
+                    f"expires [b]{expiry}[/b]{suffix_part}"
                 )
                 status.remove_class("uninit")
                 init_btn.display = False
@@ -1067,8 +1085,7 @@ class MainScreen(Screen):
         try:
             subj = ca_subject(root)
             expiry = ca_expiry(root)
-            fp = ca_fingerprint(root)
-            info = f"Subject: {subj}  |  Expires: {expiry}  |  SHA256: {fp}"
+            info = f"Subject: {subj}  |  Expires: {expiry}"
         except CAError:
             info = str(ca_path)
         self.app.push_screen(
@@ -1243,6 +1260,12 @@ class ServeScreen(Screen):
                 f"[yellow]●[/yellow]  Listening on [bold]{self._server.address}[/bold] "
                 f"[dim](HTTP only — no server cert)[/dim]"
             )
+        suffix = store.get_name_suffix(self._server.root)
+        status += (
+            f"  ·  names [bold].{suffix}[/bold]"
+            if suffix
+            else "  ·  names [dim]any[/dim]"
+        )
         yield Static(status, id="srv-status")
         yield RichLog(id="request-log", highlight=False, markup=False, wrap=False)
         yield Footer()

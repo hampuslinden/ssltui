@@ -113,6 +113,44 @@ def test_server_fqdn_roundtrip(tmp_path: Path) -> None:
     assert store.get_server_fqdn(tmp_path) is None
 
 
+def test_name_suffix_roundtrip(tmp_path: Path) -> None:
+    assert store.get_name_suffix(tmp_path) is None
+    store.set_name_suffix(tmp_path, "local")
+    assert store.get_name_suffix(tmp_path) == "local"
+    store.set_name_suffix(tmp_path, None)
+    assert store.get_name_suffix(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# Name-suffix policy helpers (config)
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_name_suffix() -> None:
+    from ssltui import config
+
+    # Leading dot, surrounding whitespace and case are all normalised away.
+    assert config.normalize_name_suffix(".local") == "local"
+    assert config.normalize_name_suffix("  Dev.Corp  ") == "dev.corp"
+    # Blank / bypass values yield the empty (unrestricted) policy.
+    assert config.normalize_name_suffix("") == ""
+    assert config.normalize_name_suffix("  .  ") == ""
+    # Anything that isn't a plain dotted DNS label sequence is rejected.
+    for bad in ("*.local", "a/b", "spa ce", "no_good!"):
+        with pytest.raises(ValueError):
+            config.normalize_name_suffix(bad)
+
+
+def test_name_matches_suffix() -> None:
+    from ssltui import config
+
+    assert config.name_matches_suffix("app.local", "local")
+    assert config.name_matches_suffix("LOCAL", "local")  # equals suffix
+    assert config.name_matches_suffix("*.app.local", "local")  # wildcard host
+    assert not config.name_matches_suffix("app.dev", "local")
+    assert not config.name_matches_suffix("notlocal", "local")  # no dot boundary
+
+
 # ---------------------------------------------------------------------------
 # Events
 # ---------------------------------------------------------------------------
@@ -183,6 +221,50 @@ def test_lifecycle_records_events(tmp_path: Path) -> None:
     revoked = [e for e in events if e["type"] == "revoke" and e["cn"] == "app.local"]
     assert issued and issued[0]["method"] == "api"
     assert revoked and revoked[0]["method"] == "tui"
+
+
+@openssl_required
+def test_name_suffix_policy_enforced_on_issue(tmp_path: Path) -> None:
+    from ssltui.ca import CAError, init_ca, issue_cert
+
+    init_ca(tmp_path, name_suffix=".local")
+    assert store.get_name_suffix(tmp_path) == "local"
+
+    # A compliant CN issues fine, even with extra SANs under the suffix.
+    meta = issue_cert(tmp_path, cn="app.local", sans=["www.app.local"])
+    assert meta["cn"] == "app.local"
+
+    # A CN outside the suffix is rejected.
+    with pytest.raises(CAError, match="not permitted by CA policy"):
+        issue_cert(tmp_path, cn="app.dev")
+
+    # A compliant CN with a non-compliant DNS SAN is also rejected, and the
+    # offending name is named.
+    with pytest.raises(CAError, match="bad.example"):
+        issue_cert(tmp_path, cn="ok.local", sans=["bad.example"])
+
+    # IP SANs are exempt from the hostname suffix policy.
+    meta = issue_cert(tmp_path, cn="api.local", sans=["10.0.0.1"])
+    assert "IP:10.0.0.1" in meta["sans"]
+
+
+@openssl_required
+def test_no_name_suffix_allows_any_name(tmp_path: Path) -> None:
+    from ssltui.ca import init_ca, issue_cert
+
+    init_ca(tmp_path)  # no policy
+    assert store.get_name_suffix(tmp_path) is None
+    meta = issue_cert(tmp_path, cn="anything.example")
+    assert meta["cn"] == "anything.example"
+
+
+@openssl_required
+def test_name_suffix_rejects_noncompliant_server_fqdn(tmp_path: Path) -> None:
+    from ssltui.ca import CAError, init_ca
+
+    # The default server cert must satisfy the policy too, so init fails clearly.
+    with pytest.raises(CAError, match="not permitted by CA policy"):
+        init_ca(tmp_path, name_suffix=".local", server_fqdn="ca.example")
 
 
 @openssl_required

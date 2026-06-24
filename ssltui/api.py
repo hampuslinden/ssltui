@@ -430,6 +430,8 @@ td{padding:4px 8px;vertical-align:middle}
   overflow:auto;font-family:var(--fnt);line-height:1.7;margin-bottom:12px}
 #admodal-btns{display:flex;gap:8px;align-items:center;flex-shrink:0}
 #ad-copy-st{font-size:11px;color:var(--grn);margin-left:auto}
+#ad-warn{display:none;color:var(--red);font-size:12px;line-height:1.5;
+  border:1px solid var(--red);padding:6px 10px;margin-bottom:10px;flex-shrink:0}
 .ad-fmt-row{display:flex;gap:10px;align-items:center;margin-bottom:8px}
 .ad-fmt-row label{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
 </style>
@@ -572,6 +574,7 @@ td{padding:4px 8px;vertical-align:middle}
             <option value="powershell">PowerShell</option>
           </select>
         </div>
+        <div id="ad-warn"></div>
         <div id="ad-preview"></div>
         <div id="admodal-btns">
           <button class="km-btn" id="ad-tok-btn" onclick="toggleDesignerTok()">Show token</button>
@@ -585,6 +588,9 @@ td{padding:4px 8px;vertical-align:middle}
 <script>
 const ESC = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const _tok = {{ server_token | tojson }};
+// CA name-suffix policy ("" = unrestricted). Mirrors config.name_matches_suffix
+// so the API Designer can flag a CN/SAN the server would reject (IPs exempt).
+const _suffix = {{ server_suffix | tojson }};
 
 // Event messages that change the cert list (see _format_event server-side):
 // "issued (api): cn", "renewed (cron): cn", "revoked (tui): cn", and the
@@ -1025,8 +1031,53 @@ function _adGen(vis) {
   return '';
 }
 
+// Names the current endpoint would submit that the CA's suffix policy rejects.
+// Mirrors the server: validates the CN and DNS SANs, exempts IP SANs (explicit
+// "IP:" prefix or a bare IPv4) and strips a "DNS:" prefix before matching.
+function _adNameViolations() {
+  if (!_suffix) return [];
+  const host = document.getElementById('ad-inputs');
+  const ep = _adEp();
+  const raw = [];
+  ep.params.forEach(p => {
+    if (p !== 'cn') return;
+    const el = host.querySelector('[data-param="cn"]');
+    if (el && el.value.trim()) raw.push(el.value.trim());
+  });
+  if (ep.body) {
+    ep.body.forEach(f => {
+      const el = host.querySelector('[data-body="' + f.name + '"]');
+      if (!el || !el.value.trim()) return;
+      if (f.cn) raw.push(el.value.trim());
+      else if (f.type === 'list') {
+        el.value.split(',').map(s => s.trim()).filter(Boolean).forEach(s => raw.push(s));
+      }
+    });
+  }
+  const bad = [];
+  raw.forEach(name => {
+    if (/^IP:/i.test(name)) return;            // explicit IP SAN — exempt
+    let n = /^DNS:/i.test(name) ? name.slice(4) : name;
+    if (/^\\d{1,3}(\\.\\d{1,3}){3}$/.test(n)) return;  // bare IPv4 — exempt
+    const low = n.toLowerCase();
+    if (low === _suffix || low.endsWith('.' + _suffix)) return;
+    bad.push(n);
+  });
+  return bad;
+}
+
 function _adUpdate() {
   document.getElementById('ad-preview').textContent = _adGen(_adTokVis);
+  const warn = document.getElementById('ad-warn');
+  const bad = _adNameViolations();
+  if (bad.length) {
+    warn.textContent = '⚠ CA policy: name(s) must be under .' + _suffix
+      + ' — the server will reject: ' + bad.join(', ');
+    warn.style.display = 'block';
+  } else {
+    warn.textContent = '';
+    warn.style.display = 'none';
+  }
 }
 
 function openDesigner() {
@@ -1495,12 +1546,15 @@ def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Fla
             ca_nfo = f"{ca_subject(root)}  \u00b7  expires {ca_expiry(root)}"
         except Exception:
             ca_nfo = "CA info unavailable"
+        suffix = store.get_name_suffix(root)
+        ca_nfo += f"  \u00b7  names .{suffix}" if suffix else "  \u00b7  names any"
         return render_template_string(
             _DASHBOARD_HTML,
             ca_info=ca_nfo,
             server_url=f"{request.scheme}://{request.host}",
             ca_root=str(root),
             server_token=token,
+            server_suffix=suffix or "",
         )
 
     @app.get("/dashboard/api/certs")
