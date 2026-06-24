@@ -105,3 +105,39 @@ def validate_cn(cn: str) -> str:
 def _safe_cn(cn: str) -> str:
     """Map a CN to a safe filesystem name."""
     return cn.replace("*", "wildcard").replace("/", "_")
+
+
+# A name-suffix policy is a plain dotted DNS label sequence (no wildcard, no
+# leading dot) — e.g. "local" or "dev.corp". The empty string means no policy.
+_SUFFIX_RE = re.compile(r"^([A-Za-z0-9_-]+\.)*[A-Za-z0-9_-]+$")
+
+
+def normalize_name_suffix(raw: str) -> str:
+    """Normalise a CA name-suffix policy string.
+
+    Strips surrounding whitespace and a single leading dot and lowercases, so
+    ``.local`` and ``local`` are stored identically. Returns ``""`` when the
+    value is blank (the user bypassed the restriction). Raises ``ValueError``
+    when a non-empty value isn't a plain dotted DNS label sequence.
+    """
+    s = raw.strip()
+    if s.startswith("."):
+        s = s[1:].strip()
+    s = s.lower()
+    if not s:
+        return ""
+    if len(s) > 253 or not _SUFFIX_RE.match(s):
+        raise ValueError(f"Invalid name suffix: {raw!r}")
+    return s
+
+
+def name_matches_suffix(name: str, suffix: str) -> bool:
+    """True if a DNS name satisfies the configured ``suffix`` restriction.
+
+    The name must equal the suffix or sit under it (``app.local`` for a
+    ``local`` suffix). Comparison is case-insensitive; ``suffix`` is expected to
+    already be normalised via :func:`normalize_name_suffix`.
+    """
+    name = name.strip().lower()
+    suffix = suffix.lower()
+    return name == suffix or name.endswith("." + suffix)

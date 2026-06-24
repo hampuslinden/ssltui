@@ -54,6 +54,7 @@ def init_ca(
     key_type: str = "ec",
     subject: str | None = None,
     server_fqdn: str | None = None,
+    name_suffix: str | None = None,
 ) -> None:
     """Create CA key and self-signed certificate in *root*.
 
@@ -64,7 +65,15 @@ def init_ca(
         server_fqdn: Optional FQDN for the dashboard/API server. When given,
             a leaf certificate is issued for it and recorded as the server
             cert so ``ssltui serve`` can present HTTPS by default.
+        name_suffix: Optional CN/SAN name-suffix policy (e.g. ``".local"``).
+            When set, every later cert request must use names under this
+            suffix. Blank/None leaves issuance unrestricted.
     """
+    try:
+        name_suffix = config.normalize_name_suffix(name_suffix or "")
+    except ValueError as exc:
+        raise CAError(str(exc)) from exc
+
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     (root / "certs").mkdir(mode=0o700, exist_ok=True)
 
@@ -141,6 +150,13 @@ def init_ca(
     token_path.write_text(secrets.token_hex(32))
     token_path.chmod(0o600)
 
+    # Persist the name-suffix policy before issuing anything so the default
+    # server cert below is validated against it too.
+    if name_suffix:
+        from ssltui.store import set_name_suffix
+
+        set_name_suffix(root, name_suffix)
+
     # --- Default dashboard/API server certificate ---
     if server_fqdn:
         server_fqdn = server_fqdn.strip()
@@ -185,6 +201,7 @@ def issue_cert(
     validity_days = min(validity_days, config.LEAF_VALIDITY_MAX)
 
     san_list = _build_san_list(cn, sans)
+    _enforce_name_suffix(root, cn, san_list)
     san_ext = ",".join(san_list)
 
     cert_dir = config.cert_dir(root, cn)
@@ -509,6 +526,27 @@ def local_ip_sans() -> list[str]:
             seen.add(ip)
             out.append(f"IP:{ip}")
     return out
+
+
+def _enforce_name_suffix(root: Path, cn: str, san_list: list[str]) -> None:
+    """Reject the request if the CN or any DNS SAN escapes the CA's policy.
+
+    IP SANs are exempt — a name-suffix policy only constrains DNS hostnames.
+    No-op when the CA was initialised without a suffix restriction.
+    """
+    from ssltui.store import get_name_suffix
+
+    suffix = get_name_suffix(root)
+    if not suffix:
+        return
+
+    names = [cn] + [e[4:] for e in san_list if e.startswith("DNS:")]
+    offenders = [n for n in names if not config.name_matches_suffix(n, suffix)]
+    if offenders:
+        uniq = ", ".join(dict.fromkeys(offenders))
+        raise CAError(
+            f"name(s) not permitted by CA policy (must be under .{suffix}): {uniq}"
+        )
 
 
 def _build_san_list(cn: str, extra_sans: list[str] | None) -> list[str]:
