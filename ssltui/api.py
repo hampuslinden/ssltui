@@ -1327,7 +1327,13 @@ class APIServer:
 
 def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Flask:
     app = Flask(__name__)
-    app.secret_key = hashlib.sha256(token.encode()).hexdigest()
+    # Derive a distinct session-cookie signing key from the API token via HMAC
+    # key separation, not password hashing. The token is a 256-bit random secret
+    # (secrets.token_hex(32)), so a fast hash is correct here; a slow password
+    # hash (bcrypt/argon2) would only matter for low-entropy human passwords.
+    app.secret_key = hmac.new(
+        token.encode(), b"ssltui-session-cookie-v1", hashlib.sha256
+    ).digest()
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     _event_log = event_log if event_log is not None else EventLog()

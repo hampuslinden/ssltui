@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run ssltui",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "windows": {
+        "command": "wt",
+        "args": [
+          "uv",
+          "run",
+          "ssltui"
+        ],
+        "presentation": {
+          "reveal": "never"
+        }
+      },
+      "linux": {
+        "command": "uv",
+        "args": [
+          "run",
+          "ssltui"
+        ],
+        "presentation": {
+          "reveal": "always",
+          "panel": "dedicated",
+          "focus": true
+        }
+      }
+    }
+  ]
+}
