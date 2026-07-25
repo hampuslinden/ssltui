@@ -2,6 +2,10 @@
 
 # Git
 !.*github
+!.gitignore
+
+# Ignore VS Code settings
+!.vscode/
 
 # Python files to ignore
 __pycache__

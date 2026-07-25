@@ -901,11 +901,11 @@ class MainScreen(Screen):
     BINDINGS = [
         Binding("i", "init_ca", "Init CA"),
         Binding("n", "issue_cert", "New cert"),
-        Binding("c", "view_ca_cert", "Trusted CA root"),
+        Binding("c", "view_ca_cert", "Trusted root"),
         Binding("d", "view_cert", "View cert"),
         Binding("x", "revoke_selected", "Revoke"),
         Binding("t", "view_token", "API Token"),
-        Binding("a", "export_audit", "Export audit"),
+        Binding("a", "export_audit", "Audit"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -930,7 +930,7 @@ class MainScreen(Screen):
             yield Button("Init CA [i]", id="btn-init", variant="primary")
             yield Button("New Cert [n]", id="btn-new")
             yield Button("Trusted CA [c]", id="btn-ca-cert")
-            yield Button("Export Audit [a]", id="btn-audit")
+            yield Button("Audit [a]", id="btn-audit")
         yield DataTable(id="cert-table", cursor_type="row", zebra_stripes=True)
         yield Footer()
 
@@ -975,7 +975,7 @@ class MainScreen(Screen):
                 expiry = ca_expiry(root)
                 suffix = store.get_name_suffix(root)
                 suffix_part = (
-                    f"  names [b].{suffix}[/b]" if suffix else "  names [dim]any[/dim]"
+                    f"  Names [b].{suffix}[/b]" if suffix else "  Names [dim]any[/dim]"
                 )
                 status.update(
                     f"[green]CA ready[/green]  [b]{subj}[/b]  "
@@ -994,15 +994,18 @@ class MainScreen(Screen):
         # the header labels alone when called outside a fresh mount, which
         # collapses the column widths.
         if not table.columns:
-            table.add_columns("CN", "SANs", "Key", "Expires", "Days left")
+            keys = table.add_columns("CN", "SANs", "Key", "Expires", "Days left")
+            self._sans_col_key = keys[1]
         table.clear()
 
+        sans_displays: list[str] = []
         for cert in store.list_certs(_root()):
             days = days_until_expiry(cert["expiry"])
             style = _expiry_style(days)
             sans_display = ", ".join(
                 s.replace("DNS:", "").replace("IP:", "") for s in cert["sans"]
             )
+            sans_displays.append(sans_display)
             table.add_row(
                 cert["cn"],
                 sans_display,
@@ -1011,6 +1014,16 @@ class MainScreen(Screen):
                 f"[{style}]{days}[/{style}]",
                 key=cert["cn"],
             )
+
+        # Render the SANs column 20% narrower than its natural content width.
+        # content_width is only computed during the deferred layout pass, so we
+        # measure the data here and pin an explicit (non-auto) width.
+        header_w = len("SANs")
+        natural = max([header_w, *(len(s) for s in sans_displays)])
+        sans_col = table.columns[self._sans_col_key]
+        sans_col.auto_width = False
+        sans_col.width = max(header_w, round(natural * 0.8))
+        table._require_update_dimensions = True
 
     def _selected_cn(self) -> str | None:
         """Return the CN of the currently highlighted table row, or None."""
@@ -1170,14 +1183,6 @@ class MainScreen(Screen):
         self._update_ca_status()
         self._build_table()
         self.refresh_bindings()
-        if result:
-            token_path = config.api_token_path(_root())
-            if token_path.exists():
-                self.app.push_screen(
-                    TokenScreen(token_path.read_text().strip()),
-                    lambda _: self.query_one("#cert-table", DataTable).focus(),
-                )
-                return
         self.query_one("#cert-table", DataTable).focus()
 
     def _on_issue_done(self, meta: dict | None) -> None:

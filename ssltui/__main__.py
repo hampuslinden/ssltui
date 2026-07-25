@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -111,6 +112,14 @@ _SUBCMDS = frozenset({"renew", "status", "issue", "audit", "serve", "get", "getr
 
 
 def main(argv: list[str] | None = None) -> None:
+    if shutil.which("openssl") is None:
+        print(
+            "Error: 'openssl' was not found on PATH. "
+            "Please install OpenSSL and ensure it is available in your PATH.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     raw: list[str] = list(argv) if argv is not None else sys.argv[1:]
 
     # Allow "ssltui <PATH>" as a shorthand for "ssltui --dir <PATH>".
