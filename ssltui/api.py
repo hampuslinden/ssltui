@@ -20,7 +20,6 @@ Wildcard CN example: GET /api/v1/certs/%2A.local/cert.pem
 from __future__ import annotations
 
 import csv
-import hashlib
 import hmac
 import io
 import json
@@ -1327,7 +1326,7 @@ class APIServer:
 
 def create_app(root: Path, token: str, event_log: EventLog | None = None) -> Flask:
     app = Flask(__name__)
-    app.secret_key = hashlib.sha256(token.encode()).hexdigest()
+    app.secret_key = token
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     _event_log = event_log if event_log is not None else EventLog()
