@@ -74,7 +74,8 @@ uv run ssltui ~/my-ca status
 ```
 
 Each directory is an independent CA. You can maintain multiple CAs by pointing
-at different directories or by using **p Root dir** in the TUI to switch at runtime.
+at different directories (`SSLTUI_DIR` or `--dir`/the positional path shorthand);
+there is currently no way to switch directories at runtime from within the TUI.
 
 ### Directory layout
 
@@ -184,9 +185,30 @@ uv run ssltui getroot > local-ca.crt
 uv run ssltui getroot --out local-ca.crt
 ```
 
+### Get a certificate, key, chain, or bundle
+
+Print or save material for an existing certificate. With no flags and a TTY,
+it prompts interactively; non-interactively, `--cn` is required and `--what`
+defaults to `cert`:
+
+```bash
+uv run ssltui get --cn api.local --what cert            # to stdout
+uv run ssltui get --cn api.local --what key --out api.key  # key + chmod 600
+uv run ssltui get --cn api.local --what full --out api.pem # chain + key bundle
+```
+
+`--what` accepts `cert` (leaf cert), `key` (private key), `chain` (leaf + CA),
+or `full` (chain + key concatenated).
+
+### Print the audit log
+
+```bash
+uv run ssltui audit   # every issue/renew/revoke/key_download event, oldest first
+```
+
 ### Cron entry
 
-Install via the TUI's **Cron Schedule** option, or add manually:
+Add a crontab entry manually:
 
 ```
 0 3 * * * /path/to/venv/bin/ssltui renew >> ~/.local/share/ssltui/renewal.log 2>&1
@@ -412,5 +434,5 @@ Run the tests:
 uv run pytest
 ```
 
-CI runs the same `ruff check`, `ruff format --check`, and `pytest` on every push
-and pull request (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
+CI runs the same `ruff check`, `ruff format --check`, and `pytest` on every pull
+request against `main` (see [.github/workflows/pr.yaml](.github/workflows/pr.yaml)).

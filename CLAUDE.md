@@ -58,7 +58,7 @@ Use only post-2020 cipher suites. Minimum TLS 1.2, prefer TLS 1.3.
 
 - For public SSL recommend the user uses [Let's Encrypt](https://letsencrypt.org/) or a commercial CA. This tool is intended for local development and private networks only.
 
-- Allow the user to create the root key with a passphrase but warn them they have to enter this every single time they use the CA. The CA is not intended for production use, and the user should be aware of the security implications of using a local CA. Default should be blank.
+- The CA root key is generated unencrypted (no passphrase support). The CA is not intended for production use, and the user should be aware of the security implications of using a local CA.
 
 - At init, allow the user to optionally restrict the CN/SAN name suffix (e.g. `.local`). The input is presented but can be bypassed (blank = unrestricted). The policy is stored in the `meta` table (`name_suffix`, normalised by `config.normalize_name_suffix`) and enforced in `ca.issue_cert` — the single chokepoint all modes funnel through — against the CN and every DNS SAN (IP SANs exempt). It is fixed at init time.
 
@@ -75,13 +75,18 @@ Full-screen textual UI. Entry point: `ssltui/tui.py`.
 ### Headless CLI mode
 
 ```bash
-ssltui --renew          # renew all certs expiring within threshold
-ssltui --renew --cert common_name   # renew a specific cert
-ssltui --issue --cn foo.local [--san ...]  # non-interactive issue
-ssltui --status         # print expiry table, exit 0 if all ok
+ssltui renew                        # renew all certs expiring within threshold
+ssltui renew --cert common_name     # renew a specific cert
+ssltui issue --cn foo.local [--san ...]  # non-interactive issue
+ssltui status                       # print expiry table, exit 0 if all ok
+ssltui get --cn foo.local --what cert  # print/save a cert, key, chain, or full bundle
+ssltui getroot                      # print the root CA certificate (PEM) to stdout
+ssltui audit                        # print the full stored event log
 ```
 
-Used by cron. Must produce machine-readable output (exit codes + stdout) and never draw curses.
+Subcommands, not `--flag` forms — `--dir PATH` (data dir override) is the only
+top-level flag; it's parsed before the subcommand. Used by cron. Must produce
+machine-readable output (exit codes + stdout) and never draw curses.
 
 ### API mode
 
@@ -115,7 +120,7 @@ $SSLTUI_DIR/
 All cert metadata, revocations, counters (serial / CRL number), and an
 append-only **event log** live in a single SQLite database (`ssltui/store.py`),
 replacing the earlier `index.json`. WAL mode plus a busy timeout let the TUI,
-the cron `--renew` process, and the multi-threaded Flask API read and write
+the cron `renew` process, and the multi-threaded Flask API read and write
 concurrently without explicit file locking. Cert/key material itself stays as
 flat PEM files under `certs/<cn>/`.
 

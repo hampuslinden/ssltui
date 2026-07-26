@@ -906,6 +906,7 @@ class MainScreen(Screen):
         Binding("x", "revoke_selected", "Revoke"),
         Binding("t", "view_token", "API Token"),
         Binding("a", "export_audit", "Audit"),
+        Binding("r", "refresh", "Refresh"),
         Binding("q", "quit", "Quit"),
     ]
 
