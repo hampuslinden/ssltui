@@ -3,7 +3,7 @@
 A single ``ca.db`` in the CA root holds the cert index, revocation list, an
 append-only event log, and small counters (serial, CRL number, version). All
 access goes through the module functions below; callers never touch the DB
-directly. WAL mode plus a busy timeout let the TUI, the cron ``--renew``
+directly. WAL mode plus a busy timeout let the TUI, the cron ``renew``
 process, and the multi-threaded Flask API read and write concurrently without
 explicit file locking.
 """

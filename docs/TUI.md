@@ -61,11 +61,16 @@ SAN that falls outside it.
 | `c` | View the trusted root CA certificate |
 | `d` | View the selected certificate |
 | `x` | Revoke and delete the selected certificate |
-| `p` | Change CA root directory |
+| `t` | View the API bearer token |
+| `a` | Export the audit log (CSV) |
 | `r` | Refresh table |
 | `q` | Quit |
 | `↑ ↓` | Navigate certificate list |
 | `Enter` | Open certificate detail |
+
+There is currently no way to change the CA root directory from within the
+TUI — restart with a different `SSLTUI_DIR`/`--dir` (or positional path) to
+work against another CA.
 
 ### Certificate detail
 
@@ -80,12 +85,26 @@ SAN that falls outside it.
 | Key | Action |
 |-----|--------|
 | `y` | Copy PEM to clipboard (OSC 52 — works in Windows Terminal) |
-| `s` | Save PEM to a file (prompts for path) |
+| `k` | Toggle the private key into/out of the view (leaf certs only; each reveal, copy, or save while showing the key is recorded as a `key_download` audit event) |
+| `s` | Save PEM to a file (prompts for path) — includes the key if it's currently shown |
 | `q` / `Esc` | Back |
 
-### Forms (issue cert, init CA, change dir)
+### Forms (issue cert, init CA)
 
 | Key | Action |
 |-----|--------|
 | `Enter` | Advance to next field; submit on last field |
 | `Esc` | Cancel |
+
+## API server screen
+
+Started via `ssltui serve` from an interactive terminal (see
+[the README](../README.md#api-mode)); shows connection status and a live
+request/event log.
+
+| Key | Action |
+|-----|--------|
+| `t` | View the API bearer token |
+| `i` | Show a curl example for issuing a certificate |
+| `c` | Copy the dashboard URL to the clipboard |
+| `q` | Stop the server and exit |

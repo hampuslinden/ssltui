@@ -1,4 +1,4 @@
-"""Expiry checks and renewal logic for headless --renew mode."""
+"""Expiry checks and renewal logic for headless renew mode."""
 
 from __future__ import annotations
 

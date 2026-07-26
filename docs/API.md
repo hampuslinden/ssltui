@@ -153,6 +153,13 @@ outside that suffix is also rejected with `400` (IP SANs are exempt):
 { "error": "name(s) not permitted by CA policy (must be under .local): app.dev" }
 ```
 
+A `cn` that already has a certificate returns `409 Conflict` — revoke it first
+(`DELETE` is not exposed; use the TUI or CLI to revoke):
+
+```json
+{ "error": "a certificate for 'api.test.local' already exists; revoke it before issuing a new one" }
+```
+
 ### Get certificate metadata
 
 ```
@@ -249,6 +256,7 @@ HTTP status code:
 | `400 Bad Request` | Invalid or missing request fields (e.g. no `cn`, bad `key_type`), or a CN/SAN outside the CA's name-suffix policy |
 | `401 Unauthorized` | Missing or incorrect bearer token |
 | `404 Not Found` | No certificate exists for the given CN, or the file is missing |
+| `409 Conflict` | A certificate for the requested `cn` already exists |
 | `500 Internal Server Error` | Unexpected server error (`{ "error": "Internal server error" }`) |
 
 ```json
